@@ -1,4 +1,5 @@
 import time
+import random
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -51,6 +52,8 @@ class MegabonkEnv(gym.Env):
         region: dict,
         step_hz: int = 12,
         frame_stack: int = 4,
+        frame_skip_range: tuple[int, int] = (6, 10),
+        sticky_steps_range: tuple[int, int] = (2, 4),
         jump_key: str = "space",
         slide_key: str = "shift",
         reset_sequence=None,
@@ -60,6 +63,8 @@ class MegabonkEnv(gym.Env):
         super().__init__()
         self.region = region
         self.dt = 1.0 / step_hz
+        self.frame_skip_range = frame_skip_range
+        self.sticky_steps_range = sticky_steps_range
         self.jump_key = jump_key
         self.slide_key = slide_key
 
@@ -85,6 +90,8 @@ class MegabonkEnv(gym.Env):
         ]
 
         self._last_obs = None
+        self._sticky_dir = 0
+        self._sticky_left = 0
 
     def _grab_frame(self):
         return np.array(self.sct.grab(self.region))[:, :, :3]
@@ -123,6 +130,8 @@ class MegabonkEnv(gym.Env):
         super().reset(seed=seed)
 
         self._do_reset_sequence()
+        self._sticky_dir = 0
+        self._sticky_left = 0
 
         # ждём, пока не будет “похоже на игру”
         self.frames.clear()
@@ -143,6 +152,8 @@ class MegabonkEnv(gym.Env):
 
     def step(self, action):
         frame = self._grab_frame()
+        screen = "UNKNOWN"
+        autopilot_action = None
 
         if self.autopilot:
             screen = self.autopilot.detect_screen(frame)
@@ -150,14 +161,29 @@ class MegabonkEnv(gym.Env):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
-                self.autopilot.ensure_running(frame)
+                self._sticky_dir = 0
+                self._sticky_left = 0
+                autopilot_action = self.autopilot.ensure_running(frame)
                 time.sleep(self.dt)
                 f = self._to_gray84(self._grab_frame())
                 self.frames.append(f)
                 obs = self._get_obs()
-                return obs, 0.0, False, False, {}
+                info = {
+                    "screen": screen,
+                    "r_alive": 0.0,
+                    "r_xp": 0.0,
+                    "r_dmg": 0.0,
+                    "xp_fill": 0.0,
+                    "hp_fill": 0.0,
+                    "autopilot": autopilot_action,
+                }
+                return obs, 0.0, False, False, info
 
         dir_id, jump, slide = action
+        if self._sticky_left <= 0:
+            self._sticky_dir = int(dir_id)
+            self._sticky_left = random.randint(*self.sticky_steps_range)
+        dir_id = self._sticky_dir
         set_move(int(dir_id))
 
         if int(jump) == 1:
@@ -165,24 +191,37 @@ class MegabonkEnv(gym.Env):
         if int(slide) == 1:
             tap(self.slide_key, dt=0.005)
 
-        time.sleep(self.dt)
-
-        f = self._to_gray84(self._grab_frame())
-        self.frames.append(f)
-        obs = self._get_obs()
-
         terminated = False
-        # базовая награда: жить
-        reward = 0.01
+        r_alive = 0.0
+        r_xp = 0.0
+        r_dmg = 0.0
+        frame_skip = random.randint(*self.frame_skip_range)
+        for _ in range(frame_skip):
+            time.sleep(self.dt)
+            f = self._to_gray84(self._grab_frame())
+            self.frames.append(f)
+            if is_death_like(f):
+                terminated = True
+                r_alive = -1.0
+                break
+            r_alive += 0.01
 
-        # смерть/меню → штраф
-        if is_death_like(f):
-            terminated = True
-            reward = -1.0
+        obs = self._get_obs()
+        reward = r_alive + r_xp + r_dmg
 
         # --- опционально: “прогресс” по HUD ---
         # Например, мерить среднюю яркость в ROI полоски XP/HP (нужно найти координаты на 84x84).
         # Это сильно помогает учиться не просто жить, а “качать прогресс”.
 
         self._last_obs = obs
-        return obs, float(reward), terminated, False, {}
+        self._sticky_left = max(0, self._sticky_left - 1)
+        info = {
+            "screen": screen,
+            "r_alive": r_alive,
+            "r_xp": r_xp,
+            "r_dmg": r_dmg,
+            "xp_fill": 0.0,
+            "hp_fill": 0.0,
+            "autopilot": autopilot_action,
+        }
+        return obs, float(reward), terminated, False, info
