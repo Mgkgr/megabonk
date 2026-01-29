@@ -171,7 +171,24 @@ class MegabonkEnv(gym.Env):
         autopilot_action = None
 
         if self.autopilot:
+            self.autopilot.debug_scores(frame)
             screen = self.autopilot.detect_screen(frame)
+            if screen == "DEAD":
+                tap("enter", dt=0.01)
+                time.sleep(0.2)
+                f = self._to_gray84(self._grab_frame())
+                self.frames.append(f)
+                obs = self._get_obs()
+                info = {
+                    "screen": screen,
+                    "r_alive": -1.0,
+                    "r_xp": 0.0,
+                    "r_dmg": 0.0,
+                    "xp_fill": 0.0,
+                    "hp_fill": 0.0,
+                    "autopilot": "dead_enter",
+                }
+                return obs, -1.0, True, False, info
             if screen != "RUNNING":
                 set_move(0)
                 key_off(self.jump_key)
