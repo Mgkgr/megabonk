@@ -150,12 +150,19 @@ class MegabonkEnv(gym.Env):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
-                self.autopilot.ensure_running(frame)
+                ok = self.autopilot.ensure_running(frame)
+                if not ok:
+                    dead_like = is_death_like(self._to_gray84(frame))
+                    if dead_like:
+                        self.autopilot.ensure_running_fallback_enter(max_enters=1)
+                    else:
+                        self.autopilot.ensure_running_fallback_enter(max_enters=6)
                 time.sleep(self.dt)
                 f = self._to_gray84(self._grab_frame())
                 self.frames.append(f)
                 obs = self._get_obs()
                 return obs, 0.0, False, False, {}
+            self.autopilot.reset_enter_series()
 
         dir_id, jump, slide = action
         set_move(int(dir_id))
