@@ -38,10 +38,10 @@ class AutoPilot:
             return "DEAD"
         if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.60):
             return "CHAR_SELECT"
-        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", 0.60):
-            return "UNLOCKS_WEAPONS"
         if self._seen(frame, "tpl_play", "REG_MAIN_PLAY", 0.60):
             return "MAIN_MENU"
+        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", 0.60):
+            return "UNLOCKS_WEAPONS"
         if self._seen(frame, "tpl_katana", "REG_CHEST", 0.60) or self._seen(
             frame, "tpl_dexec", "REG_CHEST", 0.60
         ):

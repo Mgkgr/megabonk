@@ -10,8 +10,8 @@ def get_window_region(title_contains: str):
     width, height = w.width, w.height
 
     # Иногда рамки/заголовок дают сдвиг. Если видишь рамку в захвате — подправь эти значения:
-    border_x = 8
-    titlebar_y = 32
+    border_x = 0
+    titlebar_y = 0
     return dict(
         left=left + border_x,
         top=top + titlebar_y,
