@@ -1,4 +1,7 @@
 import time
+from pathlib import Path
+
+import cv2
 import pydirectinput as di
 
 from megabonk_bot.vision import find_in_region
@@ -31,6 +34,8 @@ class AutoPilot:
         self.click_cooldown = 0.5
 
     def detect_screen(self, frame):
+        if self._seen(frame, "tpl_dead", "REG_DEAD", 0.70):
+            return "DEAD"
         if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.75):
             return "CHAR_SELECT"
         if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", 0.75):
@@ -45,6 +50,8 @@ class AutoPilot:
             frame, "tpl_foliant_bottom1", "REG_CHEST", 0.70
         ):
             return "CHEST_FOLIANT_PICK"
+        if self._seen(frame, "tpl_timer", "REG_HUD", 0.70):
+            return "RUNNING"
         if self._seen(frame, "tpl_hud", "REG_HUD", 0.75):
             return "RUNNING"
         return "UNKNOWN"
@@ -142,6 +149,28 @@ class AutoPilot:
             if self.safe_click_if_found(ok, (cx, cy), score, thr):
                 return f"picked_{name}"
         return "no_pick"
+
+    def debug_scores(self, frame, out_dir="dbg", every_s=2.0):
+        Path(out_dir).mkdir(exist_ok=True)
+        now = time.time()
+        if not hasattr(self, "_dbg_ts"):
+            self._dbg_ts = 0.0
+        if now - self._dbg_ts < every_s:
+            return
+        self._dbg_ts = now
+
+        cv2.imwrite(f"{out_dir}/frame_{int(now)}.png", frame)
+
+        checks = [
+            ("MAIN_PLAY", "tpl_play", "REG_MAIN_PLAY", 0.75),
+            ("CHAR", "tpl_char_select_title", "REG_CHAR_SELECT", 0.75),
+            ("RUN_TIMER", "tpl_timer", "REG_HUD", 0.70),
+            ("RUN_HUD", "tpl_hud", "REG_HUD", 0.75),
+            ("DEAD", "tpl_dead", "REG_DEAD", 0.70),
+        ]
+        for name, tpl, reg, thr in checks:
+            ok, _, sc = self._find(frame, tpl, reg, thr)
+            print(f"[DBG] {name:8} ok={ok} sc={sc:.3f}")
 
     def _seen(self, frame, tpl_name, reg_name, thr):
         ok, _, _ = self._find(frame, tpl_name, reg_name, thr)
