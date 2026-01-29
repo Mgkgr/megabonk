@@ -189,7 +189,7 @@ class MegabonkEnv(gym.Env):
                     "autopilot": "dead_enter",
                 }
                 return obs, -1.0, True, False, info
-            if screen in ("MAIN_MENU", "CHAR_SELECT"):
+            if screen in ("MAIN_MENU", "CHAR_SELECT", "UNKNOWN"):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
@@ -204,6 +204,9 @@ class MegabonkEnv(gym.Env):
                     acted = self.autopilot.ensure_running(frame)
                     if acted:
                         autopilot_action = "menu_click"
+                    elif screen == "UNKNOWN":
+                        autopilot_action = "menu_wait_unknown"
+                        time.sleep(self.dt)
                     else:
                         dead_like = is_death_like(self._to_gray84(frame))
                         max_enters = 1 if dead_like else 6
