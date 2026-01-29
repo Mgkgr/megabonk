@@ -189,7 +189,7 @@ class MegabonkEnv(gym.Env):
                     "autopilot": "dead_enter",
                 }
                 return obs, -1.0, True, False, info
-            if screen != "RUNNING":
+            if screen in ("MAIN_MENU", "CHAR_SELECT"):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
@@ -226,7 +226,8 @@ class MegabonkEnv(gym.Env):
                     "autopilot": autopilot_action,
                 }
                 return obs, 0.0, False, False, info
-            self.autopilot.reset_enter_series()
+            if screen == "RUNNING":
+                self.autopilot.reset_enter_series()
 
         dir_id, jump, slide = action
         if self._sticky_left <= 0:

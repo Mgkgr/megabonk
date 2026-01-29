@@ -34,25 +34,25 @@ class AutoPilot:
         self.click_cooldown = 0.5
 
     def detect_screen(self, frame):
-        if self._seen(frame, "tpl_dead", "REG_DEAD", 0.70):
+        if self._seen(frame, "tpl_dead", "REG_DEAD", 0.55):
             return "DEAD"
-        if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.75):
+        if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.60):
             return "CHAR_SELECT"
-        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", 0.75):
+        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", 0.60):
             return "UNLOCKS_WEAPONS"
-        if self._seen(frame, "tpl_play", "REG_MAIN_PLAY", 0.75):
+        if self._seen(frame, "tpl_play", "REG_MAIN_PLAY", 0.60):
             return "MAIN_MENU"
-        if self._seen(frame, "tpl_katana", "REG_CHEST", 0.70) or self._seen(
-            frame, "tpl_dexec", "REG_CHEST", 0.70
+        if self._seen(frame, "tpl_katana", "REG_CHEST", 0.60) or self._seen(
+            frame, "tpl_dexec", "REG_CHEST", 0.60
         ):
             return "CHEST_WEAPON_PICK"
-        if self._seen(frame, "tpl_blood_tome", "REG_CHEST", 0.70) or self._seen(
-            frame, "tpl_foliant_bottom1", "REG_CHEST", 0.70
+        if self._seen(frame, "tpl_blood_tome", "REG_CHEST", 0.60) or self._seen(
+            frame, "tpl_foliant_bottom1", "REG_CHEST", 0.60
         ):
             return "CHEST_FOLIANT_PICK"
-        if self._seen(frame, "tpl_timer", "REG_HUD", 0.70):
+        if self._seen(frame, "tpl_lvl", "REG_HUD", 0.55):
             return "RUNNING"
-        if self._seen(frame, "tpl_hud", "REG_HUD", 0.75):
+        if self._seen(frame, "tpl_minimap", "REG_MINIMAP", 0.55):
             return "RUNNING"
         return "UNKNOWN"
 
@@ -162,11 +162,11 @@ class AutoPilot:
         cv2.imwrite(f"{out_dir}/frame_{int(now)}.png", frame)
 
         checks = [
-            ("MAIN_PLAY", "tpl_play", "REG_MAIN_PLAY", 0.75),
-            ("CHAR", "tpl_char_select_title", "REG_CHAR_SELECT", 0.75),
-            ("RUN_TIMER", "tpl_timer", "REG_HUD", 0.70),
-            ("RUN_HUD", "tpl_hud", "REG_HUD", 0.75),
-            ("DEAD", "tpl_dead", "REG_DEAD", 0.70),
+            ("MAIN_PLAY", "tpl_play", "REG_MAIN_PLAY", 0.60),
+            ("CHAR", "tpl_char_select_title", "REG_CHAR_SELECT", 0.60),
+            ("RUN_LVL", "tpl_lvl", "REG_HUD", 0.55),
+            ("RUN_MINIMAP", "tpl_minimap", "REG_MINIMAP", 0.55),
+            ("DEAD", "tpl_dead", "REG_DEAD", 0.55),
         ]
         for name, tpl, reg, thr in checks:
             ok, _, sc = self._find(frame, tpl, reg, thr)
