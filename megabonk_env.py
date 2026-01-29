@@ -7,6 +7,10 @@ import cv2
 import pydirectinput as di
 from collections import deque
 
+from autopilot import AutoPilot
+from regions import build_regions
+from vision import load_templates
+
 # ---- управление ----
 def key_on(key: str): di.keyDown(key)
 def key_off(key: str): di.keyUp(key)
@@ -50,6 +54,8 @@ class MegabonkEnv(gym.Env):
         jump_key: str = "space",
         slide_key: str = "shift",
         reset_sequence=None,
+        templates_dir: str | None = "templates",
+        regions_builder=build_regions,
     ):
         super().__init__()
         self.region = region
@@ -63,6 +69,12 @@ class MegabonkEnv(gym.Env):
         self.sct = mss.mss()
         self.frames = deque(maxlen=frame_stack)
 
+        self.autopilot = None
+        if templates_dir:
+            templates = load_templates(templates_dir)
+            regions = regions_builder(self.region["width"], self.region["height"])
+            self.autopilot = AutoPilot(templates=templates, regions=regions)
+
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
             ("tap", "esc", 0.05),
@@ -74,8 +86,10 @@ class MegabonkEnv(gym.Env):
 
         self._last_obs = None
 
-    def _grab84(self):
-        img = np.array(self.sct.grab(self.region))[:, :, :3]  # BGR
+    def _grab_frame(self):
+        return np.array(self.sct.grab(self.region))[:, :, :3]
+
+    def _to_gray84(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
         return gray.astype(np.uint8)
@@ -83,7 +97,7 @@ class MegabonkEnv(gym.Env):
     def _get_obs(self):
         # гарантируем ровно frame_stack кадров всегда
         if len(self.frames) == 0:
-            f = self._grab84()
+            f = self._to_gray84(self._grab_frame())
             self.frames.append(f)
 
         while len(self.frames) < self.frames.maxlen:
@@ -112,12 +126,12 @@ class MegabonkEnv(gym.Env):
 
         # ждём, пока не будет “похоже на игру”
         self.frames.clear()
-        f = self._grab84()
+        f = self._to_gray84(self._grab_frame())
         self.frames.append(f)
         obs = self._get_obs()
         t0 = time.time()
         while time.time() - t0 < 6.0:
-            f = self._grab84()
+            f = self._to_gray84(self._grab_frame())
             self.frames.append(f)
             if not is_death_like(f):
                 break
@@ -128,6 +142,21 @@ class MegabonkEnv(gym.Env):
         return obs, {}
 
     def step(self, action):
+        frame = self._grab_frame()
+
+        if self.autopilot:
+            screen = self.autopilot.detect_screen(frame)
+            if screen != "RUNNING":
+                set_move(0)
+                key_off(self.jump_key)
+                key_off(self.slide_key)
+                self.autopilot.ensure_running(frame)
+                time.sleep(self.dt)
+                f = self._to_gray84(self._grab_frame())
+                self.frames.append(f)
+                obs = self._get_obs()
+                return obs, 0.0, False, False, {}
+
         dir_id, jump, slide = action
         set_move(int(dir_id))
 
@@ -138,7 +167,7 @@ class MegabonkEnv(gym.Env):
 
         time.sleep(self.dt)
 
-        f = self._grab84()
+        f = self._to_gray84(self._grab_frame())
         self.frames.append(f)
         obs = self._get_obs()
 
