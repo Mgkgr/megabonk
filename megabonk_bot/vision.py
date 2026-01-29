@@ -1,5 +1,4 @@
 import cv2
-from pathlib import Path
 
 
 def match_template(gray_img, gray_tpl):
@@ -33,19 +32,3 @@ def find_in_region(frame_bgr, tpl_bgr, region, threshold=0.80):
 
 def normalize_region(w, h, rx, ry, rw, rh):
     return (int(rx * w), int(ry * h), int(rw * w), int(rh * h))
-
-
-def load_templates(templates_dir):
-    templates = {}
-    if templates_dir is None:
-        return templates
-
-    path = Path(templates_dir)
-    if not path.exists():
-        return templates
-
-    for tpl_path in path.glob("*.png"):
-        img = cv2.imread(str(tpl_path))
-        if img is not None:
-            templates[tpl_path.stem] = img
-    return templates

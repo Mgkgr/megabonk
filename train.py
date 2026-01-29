@@ -6,7 +6,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 from window_capture import get_window_region
 from megabonk_env import MegabonkEnv
-from regions import build_regions
+from megabonk_bot.regions import build_regions
 
 WINDOW = "Megabonk"  # подстрой под реальный заголовок окна
 

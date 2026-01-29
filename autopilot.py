@@ -1,7 +1,7 @@
 import time
 import pydirectinput as di
 
-from vision import find_in_region
+from megabonk_bot.vision import find_in_region
 
 
 def click(x, y, delay=0.05):
