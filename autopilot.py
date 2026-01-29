@@ -3,6 +3,9 @@ import pydirectinput as di
 
 from megabonk_bot.vision import find_in_region
 
+di.PAUSE = 0.0
+di.FAILSAFE = False
+
 
 def click(x, y, delay=0.05):
     di.moveTo(x, y)
@@ -51,7 +54,12 @@ class AutoPilot:
         time.sleep(0.01)
         di.keyUp("enter")
 
-    def ensure_running_fallback_enter(self, max_enters=6):
+    def ensure_running_fallback_enter(self, max_enters=6, screen=None, frame=None):
+        if screen is None and frame is not None:
+            screen = self.detect_screen(frame)
+        if screen == "CHAR_SELECT":
+            self.reset_enter_series()
+            return False
         now = time.time()
         if self.enter_budget == 0 and self.enter_last_ts == 0.0:
             self.enter_budget = max_enters
@@ -86,21 +94,6 @@ class AutoPilot:
             if self.safe_click_if_found(found, (cx, cy), score, thr):
                 return True
 
-        if scr == "CHAR_SELECT":
-            thr = 0.70
-            found, (cx, cy), score = self._find(frame, "tpl_fox_face", "REG_CHAR_GRID", thr)
-            if found and score >= thr and (time.time() - self.click_last_ts) >= self.click_cooldown:
-                click(cx, cy, delay=0.08)
-                self.click_last_ts = time.time()
-            thr2 = 0.75
-            found2, (cx2, cy2), score2 = self._find(
-                frame, "tpl_confirm", "REG_CHAR_CONFIRM", thr2
-            )
-            if found2 and score2 >= thr2 and (time.time() - self.click_last_ts) >= self.click_cooldown:
-                click(cx2, cy2, delay=0.2)
-                self.click_last_ts = time.time()
-                return True
-
         if scr == "CHEST_WEAPON_PICK":
             self.handle_chest_weapon(frame)
             return True
@@ -109,10 +102,20 @@ class AutoPilot:
             self.handle_chest_foliant(frame)
             return True
 
-        if scr == "UNKNOWN":
-            tap("esc", delay=0.1)
-            return True
+        return False
 
+    def pick_fox_and_confirm(self, frame):
+        thr = 0.70
+        found, (cx, cy), score = self._find(frame, "tpl_fox_face", "REG_CHAR_GRID", thr)
+        if found and score >= thr and (time.time() - self.click_last_ts) >= self.click_cooldown:
+            click(cx, cy, delay=0.08)
+            self.click_last_ts = time.time()
+        thr2 = 0.75
+        found2, (cx2, cy2), score2 = self._find(frame, "tpl_confirm", "REG_CHAR_CONFIRM", thr2)
+        if found2 and score2 >= thr2 and (time.time() - self.click_last_ts) >= self.click_cooldown:
+            click(cx2, cy2, delay=0.2)
+            self.click_last_ts = time.time()
+            return True
         return False
 
     def handle_chest_weapon(self, frame):
