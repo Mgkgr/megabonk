@@ -164,6 +164,13 @@ class MegabonkEnv(gym.Env):
                 self._sticky_dir = 0
                 self._sticky_left = 0
                 autopilot_action = self.autopilot.ensure_running(frame)
+                ok = self.autopilot.ensure_running(frame)
+                if not ok:
+                    dead_like = is_death_like(self._to_gray84(frame))
+                    if dead_like:
+                        self.autopilot.ensure_running_fallback_enter(max_enters=1)
+                    else:
+                        self.autopilot.ensure_running_fallback_enter(max_enters=6)
                 time.sleep(self.dt)
                 f = self._to_gray84(self._grab_frame())
                 self.frames.append(f)
@@ -178,6 +185,7 @@ class MegabonkEnv(gym.Env):
                     "autopilot": autopilot_action,
                 }
                 return obs, 0.0, False, False, info
+            self.autopilot.reset_enter_series()
 
         dir_id, jump, slide = action
         if self._sticky_left <= 0:
