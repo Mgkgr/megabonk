@@ -3,7 +3,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from window_capture import get_window_region
 from megabonk_env import MegabonkEnv
-from regions import build_regions
+from megabonk_bot.regions import build_regions
 
 WINDOW = "Megabonk"
 

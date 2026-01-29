@@ -9,15 +9,17 @@ import pydirectinput as di
 from collections import deque
 
 from autopilot import AutoPilot
-from regions import build_regions
-from vision import load_templates
+from megabonk_bot.regions import build_regions
+from megabonk_bot.templates import load_templates
 
 # ---- управление ----
 def key_on(key: str): di.keyDown(key)
 def key_off(key: str): di.keyUp(key)
 
 def tap(key: str, dt=0.01):
-    di.keyDown(key); time.sleep(dt); di.keyUp(key)
+    di.keyDown(key)
+    time.sleep(dt)
+    di.keyUp(key)
 
 def set_move(dir_id: int):
     # 0 стоп, 1 W, 2 S, 3 A, 4 D, 5 WA, 6 WD, 7 SA, 8 SD
