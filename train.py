@@ -5,12 +5,13 @@ from stable_baselines3.common.monitor import Monitor
 
 from window_capture import get_window_region
 from megabonk_env import MegabonkEnv
+from regions import build_regions
 
 WINDOW = "Megabonk"  # подстрой под реальный заголовок окна
 
 def make_env():
     region = get_window_region(WINDOW)
-    env = MegabonkEnv(region=region, step_hz=12)
+    env = MegabonkEnv(region=region, step_hz=12, templates_dir="templates", regions_builder=build_regions)
     return Monitor(env)
 
 env = DummyVecEnv([make_env])
