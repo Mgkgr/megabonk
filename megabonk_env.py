@@ -1,5 +1,6 @@
 import time
 import random
+import atexit
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -11,6 +12,9 @@ from collections import deque
 from autopilot import AutoPilot
 from megabonk_bot.regions import build_regions
 from megabonk_bot.templates import load_templates
+
+di.PAUSE = 0.0
+di.FAILSAFE = False
 
 # ---- управление ----
 def key_on(key: str): di.keyDown(key)
@@ -31,6 +35,15 @@ def set_move(dir_id: int):
     want = set(mapping[int(dir_id)])
     for k in ["w","a","s","d"]:
         (key_on if k in want else key_off)(k)
+
+def release_all_keys():
+    for k in ["w", "a", "s", "d", "space", "lctrl", "shift", "enter", "esc"]:
+        try:
+            di.keyUp(k)
+        except Exception:
+            pass
+
+atexit.register(release_all_keys)
 
 # ---- детектор смерти/меню (очень грубо) ----
 def is_death_like(frame_gray_84):
@@ -163,16 +176,25 @@ class MegabonkEnv(gym.Env):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
+                di.keyUp("enter")
+                di.keyUp("esc")
                 self._sticky_dir = 0
                 self._sticky_left = 0
-                autopilot_action = self.autopilot.ensure_running(frame)
-                ok = self.autopilot.ensure_running(frame)
-                if not ok:
-                    dead_like = is_death_like(self._to_gray84(frame))
-                    if dead_like:
-                        self.autopilot.ensure_running_fallback_enter(max_enters=1)
+                if screen == "CHAR_SELECT":
+                    acted = self.autopilot.pick_fox_and_confirm(frame)
+                    autopilot_action = "pick_fox" if acted else "char_wait"
+                else:
+                    acted = self.autopilot.ensure_running(frame)
+                    if acted:
+                        autopilot_action = "menu_click"
                     else:
-                        self.autopilot.ensure_running_fallback_enter(max_enters=6)
+                        dead_like = is_death_like(self._to_gray84(frame))
+                        max_enters = 1 if dead_like else 6
+                        did_enter = self.autopilot.ensure_running_fallback_enter(
+                            max_enters=max_enters,
+                            screen=screen,
+                        )
+                        autopilot_action = "enter_fallback" if did_enter else "menu_wait"
                 time.sleep(self.dt)
                 f = self._to_gray84(self._grab_frame())
                 self.frames.append(f)
