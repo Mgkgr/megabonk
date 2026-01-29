@@ -2,12 +2,32 @@ import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.callbacks import BaseCallback
 
 from window_capture import get_window_region
 from megabonk_env import MegabonkEnv
 from regions import build_regions
 
 WINDOW = "Megabonk"  # подстрой под реальный заголовок окна
+
+
+class PrintCallback(BaseCallback):
+    def __init__(self, every=200):
+        super().__init__()
+        self.every = every
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.every == 0:
+            infos = self.locals.get("infos")
+            if infos:
+                i = infos[0]
+                print(
+                    f"[{self.n_calls}] screen={i.get('screen')} "
+                    f"xp={i.get('xp_fill'):.3f} hp={i.get('hp_fill'):.3f} "
+                    f"r=({i.get('r_alive'):.3f},{i.get('r_xp'):.3f},{i.get('r_dmg'):.3f}) "
+                    f"auto={i.get('autopilot')}"
+                )
+        return True
 
 def make_env():
     region = get_window_region(WINDOW)
@@ -29,7 +49,8 @@ model = PPO(
     batch_size=256,
     gamma=0.99,
     learning_rate=2.5e-4,
+    tensorboard_log="tb",
 )
 
-model.learn(total_timesteps=2_000_000)
+model.learn(total_timesteps=2_000_000, callback=PrintCallback(every=200))
 model.save("megabonk_ppo_cnn")
