@@ -6,16 +6,17 @@ import mss
 import numpy as np
 
 
-user32 = ctypes.windll.user32
-WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
 except Exception:
     try:
-        user32.SetProcessDPIAware()
+        ctypes.windll.user32.SetProcessDPIAware()
     except Exception:
         pass
+
+
+user32 = ctypes.windll.user32
+WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
 class RECT(ctypes.Structure):
