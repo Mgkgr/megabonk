@@ -1,50 +1,143 @@
 import ctypes
 from ctypes import wintypes
+from dataclasses import dataclass
 
-import win32gui
+import mss
+import numpy as np
 
 
-user32 = ctypes.WinDLL("user32", use_last_error=True)
+user32 = ctypes.windll.user32
 
 
 class RECT(ctypes.Structure):
     _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
     ]
 
 
-def _get_client_rect_screen(hwnd: int):
+class POINT(ctypes.Structure):
+    _fields_ = [
+        ("x", wintypes.LONG),
+        ("y", wintypes.LONG),
+    ]
+
+
+user32.EnumWindows.argtypes = [wintypes.WNDENUMPROC, wintypes.LPARAM]
+user32.EnumWindows.restype = wintypes.BOOL
+
+user32.IsWindowVisible.argtypes = [wintypes.HWND]
+user32.IsWindowVisible.restype = wintypes.BOOL
+
+user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+user32.GetWindowTextLengthW.restype = ctypes.c_int
+
+user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetWindowTextW.restype = ctypes.c_int
+
+user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+user32.GetClientRect.restype = wintypes.BOOL
+
+user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(POINT)]
+user32.ClientToScreen.restype = wintypes.BOOL
+
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.restype = wintypes.BOOL
+
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+
+
+SW_RESTORE = 9
+
+
+def find_hwnd_by_title_substr(title_substr: str) -> int | None:
+    target = title_substr.lower().strip()
+    found = {"hwnd": None}
+
+    @wintypes.WNDENUMPROC
+    def enum_proc(hwnd, lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value
+
+        if target in title.lower():
+            found["hwnd"] = hwnd
+            return False
+        return True
+
+    user32.EnumWindows(enum_proc, 0)
+    return found["hwnd"]
+
+
+def get_client_bbox_on_screen(hwnd: int) -> dict:
     rect = RECT()
-    if not user32.GetClientRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
-        raise ctypes.WinError(ctypes.get_last_error())
+    if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+        raise RuntimeError("GetClientRect failed")
 
-    pt = wintypes.POINT(rect.left, rect.top)
-    if not user32.ClientToScreen(wintypes.HWND(hwnd), ctypes.byref(pt)):
-        raise ctypes.WinError(ctypes.get_last_error())
+    pt = POINT(0, 0)
+    if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
+        raise RuntimeError("ClientToScreen failed")
 
-    left = pt.x
-    top = pt.y
-    width = rect.right - rect.left
-    height = rect.bottom - rect.top
-    return left, top, width, height
+    width = int(rect.right - rect.left)
+    height = int(rect.bottom - rect.top)
+    return {
+        "left": int(pt.x),
+        "top": int(pt.y),
+        "width": width,
+        "height": height,
+    }
+
+
+@dataclass
+class WindowCapture:
+    window_title: str
+    hwnd: int
+    sct: mss.mss
+
+    @classmethod
+    def create(cls, window_title: str = "MEGABONK"):
+        hwnd = find_hwnd_by_title_substr(window_title)
+        if not hwnd:
+            raise RuntimeError(
+                f"Window not found by title substring: {window_title!r}"
+            )
+        return cls(window_title=window_title, hwnd=hwnd, sct=mss.mss())
+
+    def focus(self):
+        user32.ShowWindow(self.hwnd, SW_RESTORE)
+        user32.SetForegroundWindow(self.hwnd)
+
+    def get_bbox(self) -> dict:
+        return get_client_bbox_on_screen(self.hwnd)
+
+    def grab(self):
+        bbox = self.get_bbox()
+        img = np.array(self.sct.grab(bbox), dtype=np.uint8)
+        frame = img[:, :, :3]
+        return frame
+
+    def debug_print(self):
+        bbox = self.get_bbox()
+        print(f"[CAP] bbox={bbox}")
+        frame = self.grab()
+        print(f"[CAP] frame.shape={frame.shape} (H,W,C)")
+        return frame
+
 
 def get_window_region(title_contains: str):
-    hwnd = win32gui.FindWindow(None, title_contains)
-    if hwnd == 0:
-        matches = []
-
-        def enum_cb(h, acc):
-            title = win32gui.GetWindowText(h)
-            if title_contains.lower() in title.lower():
-                acc.append(h)
-
-        win32gui.EnumWindows(enum_cb, matches)
-        if not matches:
-            raise RuntimeError(f"Не нашёл окно с '{title_contains}'. Проверь заголовок окна игры.")
-        hwnd = matches[0]
-
-    left, top, width, height = _get_client_rect_screen(hwnd)
-    return dict(left=left, top=top, width=width, height=height)
+    hwnd = find_hwnd_by_title_substr(title_contains)
+    if not hwnd:
+        raise RuntimeError(
+            f"Window not found by title substring: {title_contains!r}"
+        )
+    return get_client_bbox_on_screen(hwnd)

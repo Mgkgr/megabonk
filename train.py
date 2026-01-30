@@ -1,10 +1,33 @@
+# --- DPI AWARE (must be first imports) ---
+import ctypes
+
+
+def enable_dpi_awareness():
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
+enable_dpi_awareness()
+# --- end DPI AWARE ---
+
 import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback
 
-from window_capture import get_window_region
 from megabonk_env import MegabonkEnv
 from megabonk_bot.regions import build_regions
 
@@ -30,8 +53,7 @@ class PrintCallback(BaseCallback):
         return True
 
 def make_env():
-    region = get_window_region(WINDOW)
-    env = MegabonkEnv(region=region, step_hz=12, templates_dir="templates", regions_builder=build_regions)
+    env = MegabonkEnv(window_title=WINDOW, step_hz=12, templates_dir="templates", regions_builder=build_regions)
     return Monitor(env)
 
 env = DummyVecEnv([make_env])

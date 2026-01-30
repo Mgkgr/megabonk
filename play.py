@@ -1,15 +1,13 @@
 import time
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
-from window_capture import get_window_region
 from megabonk_env import MegabonkEnv
 from megabonk_bot.regions import build_regions
 
 WINDOW = "Megabonk"
 
 def make_env():
-    region = get_window_region(WINDOW)
-    return MegabonkEnv(region=region, step_hz=12, templates_dir="templates", regions_builder=build_regions)
+    return MegabonkEnv(window_title=WINDOW, step_hz=12, templates_dir="templates", regions_builder=build_regions)
 
 env = DummyVecEnv([make_env])
 env = VecTransposeImage(env)

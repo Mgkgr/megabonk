@@ -12,6 +12,7 @@ from collections import deque
 from autopilot import AutoPilot
 from megabonk_bot.regions import build_regions
 from megabonk_bot.templates import load_templates
+from window_capture import WindowCapture
 
 di.PAUSE = 0.0
 di.FAILSAFE = False
@@ -64,7 +65,7 @@ class MegabonkEnv(gym.Env):
 
     def __init__(
         self,
-        region: dict,
+        region: dict | None = None,
         step_hz: int = 12,
         frame_stack: int = 4,
         frame_skip_range: tuple[int, int] = (6, 10),
@@ -74,9 +75,23 @@ class MegabonkEnv(gym.Env):
         reset_sequence=None,
         templates_dir: str | None = "templates",
         regions_builder=build_regions,
+        window_title: str | None = None,
+        cap: WindowCapture | None = None,
     ):
         super().__init__()
-        self.region = region
+        self.cap = cap
+        if self.cap is None and window_title:
+            self.cap = WindowCapture.create(window_title)
+            self.cap.focus()
+
+        if self.cap is not None:
+            self.region = self.cap.get_bbox()
+            self.sct = None
+        else:
+            if region is None:
+                raise ValueError("region is required when window_title/cap not provided")
+            self.region = region
+            self.sct = mss.mss()
         self.dt = 1.0 / step_hz
         self.frame_skip_range = frame_skip_range
         self.sticky_steps_range = sticky_steps_range
@@ -86,7 +101,6 @@ class MegabonkEnv(gym.Env):
         self.action_space = spaces.MultiDiscrete([9, 2, 2])
         self.observation_space = spaces.Box(0, 255, shape=(84, 84, frame_stack), dtype=np.uint8)
 
-        self.sct = mss.mss()
         self.frames = deque(maxlen=frame_stack)
 
         self.autopilot = None
@@ -109,6 +123,8 @@ class MegabonkEnv(gym.Env):
         self._sticky_left = 0
 
     def _grab_frame(self):
+        if self.cap is not None:
+            return self.cap.grab()
         return np.array(self.sct.grab(self.region))[:, :, :3]
 
     def _to_gray84(self, img):
