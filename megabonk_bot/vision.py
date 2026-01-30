@@ -25,7 +25,7 @@ def find_in_region(
     tpl_bgr,
     region,
     threshold=0.80,
-    scales=(0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30),
+    scales=(0.75, 0.85, 0.95, 1.00, 1.10, 1.25, 1.40, 1.60),
     method=cv2.TM_CCOEFF_NORMED,
 ):
     """

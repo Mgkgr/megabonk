@@ -96,7 +96,7 @@ class AutoPilot:
         scr = self.detect_screen(frame)
 
         if scr == "MAIN_MENU":
-            thr = 0.75
+            thr = 0.65
             found, (cx, cy), score = self._find(frame, "tpl_play", "REG_MAIN_PLAY", thr)
             if self.safe_click_if_found(found, (cx, cy), score, thr):
                 return True
@@ -112,12 +112,12 @@ class AutoPilot:
         return False
 
     def pick_fox_and_confirm(self, frame):
-        thr = 0.70
+        thr = 0.65
         found, (cx, cy), score = self._find(frame, "tpl_fox_face", "REG_CHAR_GRID", thr)
         if found and score >= thr and (time.time() - self.click_last_ts) >= self.click_cooldown:
             click(cx, cy, delay=0.08)
             self.click_last_ts = time.time()
-        thr2 = 0.75
+        thr2 = 0.70
         found2, (cx2, cy2), score2 = self._find(frame, "tpl_confirm", "REG_CHAR_CONFIRM", thr2)
         if found2 and score2 >= thr2 and (time.time() - self.click_last_ts) >= self.click_cooldown:
             click(cx2, cy2, delay=0.2)
@@ -126,7 +126,7 @@ class AutoPilot:
         return False
 
     def handle_chest_weapon(self, frame):
-        thr = 0.70
+        thr = 0.65
         ok, (cx, cy), score = self._find(frame, "tpl_katana", "REG_CHEST", thr)
         if self.safe_click_if_found(ok, (cx, cy), score, thr):
             return "picked_katana"
@@ -144,7 +144,7 @@ class AutoPilot:
             "tpl_foliant_bottom3",
             "tpl_blood_tome",
         ]:
-            thr = 0.70
+            thr = 0.65
             ok, (cx, cy), score = self._find(frame, name, "REG_CHEST", thr)
             if self.safe_click_if_found(ok, (cx, cy), score, thr):
                 return f"picked_{name}"
