@@ -37,9 +37,21 @@ def build_regions(width, height):
             int(0.80 * height),
         ),
         "REG_HUD": (
-            int(0.01 * width),
-            int(0.01 * height),
+            int(0.70 * width),
+            int(0.00 * height),
             int(0.30 * width),
             int(0.12 * height),
+        ),
+        "REG_MINIMAP": (
+            int(0.80 * width),
+            int(0.05 * height),
+            int(0.20 * width),
+            int(0.30 * height),
+        ),
+        "REG_DEAD": (
+            int(0.30 * width),
+            int(0.20 * height),
+            int(0.40 * width),
+            int(0.20 * height),
         ),
     }
