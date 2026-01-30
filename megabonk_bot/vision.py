@@ -25,8 +25,25 @@ def find_in_region(
     tpl_bgr,
     region,
     threshold=0.80,
-    scales=(0.75, 0.85, 0.95, 1.00, 1.10, 1.25, 1.40, 1.60),
+    scales=(
+        0.60,
+        0.70,
+        0.75,
+        0.80,
+        0.85,
+        0.90,
+        0.95,
+        1.00,
+        1.05,
+        1.10,
+        1.15,
+        1.20,
+        1.25,
+        1.30,
+        1.35,
+    ),
     method=cv2.TM_CCOEFF_NORMED,
+    debug_out=None,
 ):
     """
     region: (x,y,w,h) в координатах кадра
@@ -44,6 +61,7 @@ def find_in_region(
 
     best_score = -1.0
     best_center = (0, 0)
+    best_size = None
     h0, w0 = g_tpl0.shape[:2]
 
     for scale in scales:
@@ -54,7 +72,8 @@ def find_in_region(
         if tw >= g_roi.shape[1] or th >= g_roi.shape[0]:
             continue
 
-        g_tpl = cv2.resize(g_tpl0, (tw, th), interpolation=cv2.INTER_AREA)
+        interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        g_tpl = cv2.resize(g_tpl0, (tw, th), interpolation=interp)
         res = cv2.matchTemplate(g_roi, g_tpl, method)
         _, maxv, _, maxloc = cv2.minMaxLoc(res)
         if maxv > best_score:
@@ -62,8 +81,24 @@ def find_in_region(
             cy = y + maxloc[1] + th // 2
             best_score = float(maxv)
             best_center = (cx, cy)
+            best_size = (tw, th)
 
     found = best_score >= threshold
+    if debug_out is not None and best_size is not None:
+        tw, th = best_size
+        x0 = best_center[0] - tw // 2
+        y0 = best_center[1] - th // 2
+        cv2.rectangle(debug_out, (x0, y0), (x0 + tw, y0 + th), (0, 255, 0), 2)
+        cv2.putText(
+            debug_out,
+            f"{best_score:.3f}",
+            (x0, max(0, y0 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
     return found, best_center, best_score
 
 
