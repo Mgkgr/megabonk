@@ -7,6 +7,7 @@ import numpy as np
 
 
 user32 = ctypes.windll.user32
+WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
 class RECT(ctypes.Structure):
@@ -25,7 +26,7 @@ class POINT(ctypes.Structure):
     ]
 
 
-user32.EnumWindows.argtypes = [wintypes.WNDENUMPROC, wintypes.LPARAM]
+user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
 user32.EnumWindows.restype = wintypes.BOOL
 
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
@@ -57,7 +58,6 @@ def find_hwnd_by_title_substr(title_substr: str) -> int | None:
     target = title_substr.lower().strip()
     found = {"hwnd": None}
 
-    @wintypes.WNDENUMPROC
     def enum_proc(hwnd, lparam):
         if not user32.IsWindowVisible(hwnd):
             return True
@@ -75,7 +75,8 @@ def find_hwnd_by_title_substr(title_substr: str) -> int | None:
             return False
         return True
 
-    user32.EnumWindows(enum_proc, 0)
+    cb = WNDENUMPROC(enum_proc)
+    user32.EnumWindows(cb, 0)
     return found["hwnd"]
 
 
