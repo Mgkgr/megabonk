@@ -82,7 +82,8 @@ class MegabonkEnv(gym.Env):
         self.cap = cap
         if self.cap is None and window_title:
             self.cap = WindowCapture.create(window_title)
-            self.cap.focus()
+        if self.cap is not None:
+            self.cap.focus(topmost=True)
 
         if self.cap is not None:
             self.region = self.cap.get_bbox()

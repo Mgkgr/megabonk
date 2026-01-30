@@ -9,6 +9,14 @@ import numpy as np
 user32 = ctypes.windll.user32
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    try:
+        user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 
 class RECT(ctypes.Structure):
     _fields_ = [
@@ -50,8 +58,24 @@ user32.ShowWindow.restype = wintypes.BOOL
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.SetForegroundWindow.restype = wintypes.BOOL
 
+user32.SetWindowPos.argtypes = [
+    wintypes.HWND,
+    wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_uint,
+]
+user32.SetWindowPos.restype = wintypes.BOOL
+
 
 SW_RESTORE = 9
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_SHOWWINDOW = 0x0040
 
 
 def find_hwnd_by_title_substr(title_substr: str) -> int | None:
@@ -114,8 +138,17 @@ class WindowCapture:
             )
         return cls(window_title=window_title, hwnd=hwnd, sct=mss.mss())
 
-    def focus(self):
+    def focus(self, topmost: bool = True):
         user32.ShowWindow(self.hwnd, SW_RESTORE)
+        user32.SetWindowPos(
+            self.hwnd,
+            HWND_TOPMOST if topmost else HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
         user32.SetForegroundWindow(self.hwnd)
 
     def get_bbox(self) -> dict:
@@ -141,4 +174,6 @@ def get_window_region(title_contains: str):
         raise RuntimeError(
             f"Window not found by title substring: {title_contains!r}"
         )
-    return get_client_bbox_on_screen(hwnd)
+    bbox = get_client_bbox_on_screen(hwnd)
+    bbox["hwnd"] = hwnd
+    return bbox

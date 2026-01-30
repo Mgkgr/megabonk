@@ -46,13 +46,29 @@ def find_in_region(
     best_score = -1.0
     best_center = (0, 0)
     h0, w0 = g_tpl0.shape[:2]
+    roi_h, roi_w = g_roi.shape[:2]
+    max_scale = min(roi_w / w0, roi_h / h0)
+    if max_scale <= 0:
+        return False, (0, 0), 0.0
 
-    for scale in scales:
+    scales_list = list(scales)
+    if max_scale < min(scales_list):
+        if max_scale < 0.5:
+            return False, (0, 0), 0.0
+        scales_list = [max_scale]
+    else:
+        scales_list = [scale for scale in scales_list if scale <= max_scale]
+        if not scales_list:
+            if max_scale < 0.5:
+                return False, (0, 0), 0.0
+            scales_list = [max_scale]
+
+    for scale in scales_list:
         tw = int(w0 * scale)
         th = int(h0 * scale)
         if tw < 8 or th < 8:
             continue
-        if tw >= g_roi.shape[1] or th >= g_roi.shape[0]:
+        if tw >= roi_w or th >= roi_h:
             continue
 
         g_tpl = cv2.resize(g_tpl0, (tw, th), interpolation=cv2.INTER_AREA)
