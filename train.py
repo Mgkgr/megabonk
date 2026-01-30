@@ -22,14 +22,14 @@ def enable_dpi_awareness():
 enable_dpi_awareness()
 # --- end DPI AWARE ---
 
-import torch
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import BaseCallback
+import torch  # noqa: E402
+from stable_baselines3 import PPO  # noqa: E402
+from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage  # noqa: E402
+from stable_baselines3.common.monitor import Monitor  # noqa: E402
+from stable_baselines3.common.callbacks import BaseCallback  # noqa: E402
 
-from megabonk_env import MegabonkEnv
-from megabonk_bot.regions import build_regions
+from megabonk_env import MegabonkEnv  # noqa: E402
+from megabonk_bot.regions import build_regions  # noqa: E402
 
 WINDOW = "Megabonk"  # подстрой под реальный заголовок окна
 
