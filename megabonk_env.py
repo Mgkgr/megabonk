@@ -9,7 +9,7 @@ import cv2
 import pydirectinput as di
 from collections import deque
 
-from autopilot import AutoPilot
+from autopilot import AutoPilot, HeuristicAutoPilot
 from megabonk_bot.regions import build_regions
 from megabonk_bot.templates import load_templates
 from window_capture import WindowCapture
@@ -59,7 +59,7 @@ def is_death_like(frame_gray_84):
 class MegabonkEnv(gym.Env):
     """
     Observations: uint8 (84, 84, 4) — стек 4 кадров (grayscale).
-    Actions: MultiDiscrete [dir(0..8), jump(0/1), slide(0/1)]
+    Actions: MultiDiscrete [dir(0..8), cam_yaw(0..2), jump(0/1), slide(0/1)]
     """
     metadata = {"render_modes": []}
 
@@ -72,6 +72,9 @@ class MegabonkEnv(gym.Env):
         sticky_steps_range: tuple[int, int] = (2, 4),
         jump_key: str = "space",
         slide_key: str = "shift",
+        include_cam_yaw: bool = True,
+        cam_yaw_pixels: int = 80,
+        use_heuristic_autopilot: bool = False,
         reset_sequence=None,
         templates_dir: str | None = "templates",
         regions_builder=build_regions,
@@ -98,17 +101,26 @@ class MegabonkEnv(gym.Env):
         self.sticky_steps_range = sticky_steps_range
         self.jump_key = jump_key
         self.slide_key = slide_key
+        self.include_cam_yaw = include_cam_yaw
+        self.cam_yaw_pixels = int(cam_yaw_pixels)
+        self.use_heuristic_autopilot = use_heuristic_autopilot
 
-        self.action_space = spaces.MultiDiscrete([9, 2, 2])
+        if self.include_cam_yaw:
+            self.action_space = spaces.MultiDiscrete([9, 3, 2, 2])
+        else:
+            self.action_space = spaces.MultiDiscrete([9, 2, 2])
         self.observation_space = spaces.Box(0, 255, shape=(84, 84, frame_stack), dtype=np.uint8)
 
         self.frames = deque(maxlen=frame_stack)
 
         self.autopilot = None
+        self.heuristic_pilot = None
         if templates_dir:
             templates = load_templates(templates_dir)
             regions = regions_builder(self.region["width"], self.region["height"])
             self.autopilot = AutoPilot(templates=templates, regions=regions)
+        if self.use_heuristic_autopilot:
+            self.heuristic_pilot = HeuristicAutoPilot()
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
@@ -122,6 +134,14 @@ class MegabonkEnv(gym.Env):
         self._last_obs = None
         self._sticky_dir = 0
         self._sticky_left = 0
+
+    def _apply_cam_yaw(self, yaw_id: int):
+        if not self.include_cam_yaw:
+            return
+        mapping = {0: -self.cam_yaw_pixels, 1: 0, 2: self.cam_yaw_pixels}
+        dx = mapping.get(int(yaw_id), 0)
+        if dx != 0:
+            di.moveRel(dx, 0, duration=0)
 
     def _grab_frame(self):
         if self.cap is not None:
@@ -249,7 +269,29 @@ class MegabonkEnv(gym.Env):
             if screen == "RUNNING":
                 self.autopilot.reset_enter_series()
 
-        dir_id, jump, slide = action
+        if self.include_cam_yaw:
+            if len(action) == 3:
+                dir_id, jump, slide = action
+                yaw = 1
+            else:
+                dir_id, yaw, jump, slide = action
+        else:
+            dir_id, jump, slide = action
+            yaw = 1
+
+        if self.use_heuristic_autopilot and screen == "RUNNING" and self.heuristic_pilot:
+            if self.include_cam_yaw:
+                dir_id, yaw, jump, slide, reason = self.heuristic_pilot.act(
+                    frame, include_cam_yaw=True
+                )
+            else:
+                dir_id, jump, slide, reason = self.heuristic_pilot.act(
+                    frame, include_cam_yaw=False
+                )
+                yaw = 1
+            autopilot_action = f"heuristic:{reason}"
+
+        self._apply_cam_yaw(yaw)
         if self._sticky_left <= 0:
             self._sticky_dir = int(dir_id)
             self._sticky_left = random.randint(*self.sticky_steps_range)

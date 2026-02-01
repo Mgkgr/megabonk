@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pydirectinput as di
 
 from megabonk_bot.vision import find_in_region
@@ -182,3 +183,140 @@ class AutoPilot:
         tpl = self.t[tpl_name]
         reg = self.r[reg_name]
         return find_in_region(frame, tpl, reg, threshold=thr)
+
+
+class HeuristicAutoPilot:
+    def __init__(
+        self,
+        enemy_hsv_lower=(45, 80, 40),
+        enemy_hsv_upper=(85, 255, 255),
+        coin_hsv_lower=(18, 120, 80),
+        coin_hsv_upper=(35, 255, 255),
+        enemy_area_threshold=1400,
+        coin_area_threshold=900,
+        center_roi=(0.35, 0.38, 0.30, 0.36),
+        center_lower_roi=(0.35, 0.55, 0.30, 0.35),
+        stuck_diff_threshold=3.0,
+        scan_period=12,
+    ):
+        self.enemy_hsv_lower = np.array(enemy_hsv_lower, dtype=np.uint8)
+        self.enemy_hsv_upper = np.array(enemy_hsv_upper, dtype=np.uint8)
+        self.coin_hsv_lower = np.array(coin_hsv_lower, dtype=np.uint8)
+        self.coin_hsv_upper = np.array(coin_hsv_upper, dtype=np.uint8)
+        self.enemy_area_threshold = float(enemy_area_threshold)
+        self.coin_area_threshold = float(coin_area_threshold)
+        self.center_roi = center_roi
+        self.center_lower_roi = center_lower_roi
+        self.stuck_diff_threshold = float(stuck_diff_threshold)
+        self.scan_period = int(scan_period)
+        self._scan_dir = -1
+        self._scan_ticks = 0
+        self._last_gray = None
+        self._last_forward = False
+        self._stuck_toggle = False
+
+    def act(self, frame, include_cam_yaw=True):
+        h, w = frame.shape[:2]
+        danger_center, danger_area = self._find_center_in_roi(
+            frame, self.enemy_hsv_lower, self.enemy_hsv_upper, self.center_lower_roi
+        )
+        loot_center, loot_area = self._find_center_in_roi(
+            frame, self.coin_hsv_lower, self.coin_hsv_upper, self.center_roi
+        )
+        danger = danger_area >= self.enemy_area_threshold
+        loot = loot_area >= self.coin_area_threshold
+
+        center_x = w * 0.5
+        yaw = 1
+        dir_id = 1
+        jump = 0
+        slide = 0
+        reason = "cruise"
+
+        if danger and danger_center is not None:
+            slide = 1
+            if danger_center[0] < center_x:
+                dir_id = 4
+                yaw = 2
+            else:
+                dir_id = 3
+                yaw = 0
+            reason = "evade_enemy"
+        elif loot and loot_center is not None:
+            offset = loot_center[0] - center_x
+            if offset < -w * 0.06:
+                dir_id = 5
+                yaw = 0
+            elif offset > w * 0.06:
+                dir_id = 6
+                yaw = 2
+            else:
+                dir_id = 1
+                yaw = 1
+            reason = "seek_loot"
+        else:
+            yaw = 0 if self._scan_dir < 0 else 2
+            self._scan_ticks += 1
+            if self._scan_ticks >= self.scan_period:
+                self._scan_ticks = 0
+                self._scan_dir *= -1
+            reason = "scan_forward"
+
+        stuck = self._is_stuck(frame)
+        if stuck and not danger:
+            self._stuck_toggle = not self._stuck_toggle
+            dir_id = 3 if self._stuck_toggle else 4
+            yaw = 0 if dir_id == 3 else 2
+            jump = 1
+            reason = "unstuck"
+
+        forwardish = dir_id in (1, 5, 6)
+        self._last_forward = forwardish
+
+        if include_cam_yaw:
+            return (dir_id, yaw, jump, slide, reason)
+        return (dir_id, jump, slide, reason)
+
+    def _is_stuck(self, frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if self._last_gray is None:
+            self._last_gray = gray
+            return False
+        diff = cv2.absdiff(gray, self._last_gray)
+        self._last_gray = gray
+        if not self._last_forward:
+            return False
+        return float(diff.mean()) < self.stuck_diff_threshold
+
+    def _find_center_in_roi(self, frame, lower, upper, roi_rel):
+        h, w = frame.shape[:2]
+        x0 = int(roi_rel[0] * w)
+        y0 = int(roi_rel[1] * h)
+        rw = int(roi_rel[2] * w)
+        rh = int(roi_rel[3] * h)
+        x1 = min(w, x0 + rw)
+        y1 = min(h, y0 + rh)
+        if x1 <= x0 or y1 <= y0:
+            return None, 0.0
+
+        roi = frame[y0:y1, x0:x1]
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, lower, upper)
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = contours[0] if len(contours) == 2 else contours[1]
+        if not contours:
+            return None, 0.0
+        contour = max(contours, key=cv2.contourArea)
+        area = float(cv2.contourArea(contour))
+        if area <= 0.0:
+            return None, 0.0
+        moments = cv2.moments(contour)
+        if moments["m00"] == 0:
+            return None, area
+        cx = int(moments["m10"] / moments["m00"]) + x0
+        cy = int(moments["m01"] / moments["m00"]) + y0
+        return (cx, cy), area
