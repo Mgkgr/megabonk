@@ -1,4 +1,5 @@
 import ctypes
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 
@@ -129,6 +130,9 @@ class WindowCapture:
     window_title: str
     hwnd: int
     sct: mss.mss
+    _last_grab_ts: float = 0.0
+    _last_grab_hz: float = 0.0
+    _bad_grab_count: int = 0
 
     @classmethod
     def create(cls, window_title: str = "MEGABONK"):
@@ -157,9 +161,38 @@ class WindowCapture:
 
     def grab(self):
         bbox = self.get_bbox()
-        img = np.array(self.sct.grab(bbox), dtype=np.uint8)
-        frame = img[:, :, :3]
-        return frame
+        expected_h = int(bbox["height"])
+        expected_w = int(bbox["width"])
+        attempts = 3
+        base_backoff_s = 0.05
+
+        now = time.time()
+        if self._last_grab_ts > 0:
+            dt = now - self._last_grab_ts
+            if dt > 0:
+                self._last_grab_hz = 1.0 / dt
+        self._last_grab_ts = now
+
+        for attempt in range(attempts):
+            try:
+                img = np.array(self.sct.grab(bbox), dtype=np.uint8)
+                if img.size == 0:
+                    raise ValueError("Empty frame grab")
+                frame = img[:, :, :3]
+                if frame.shape[0] != expected_h or frame.shape[1] != expected_w:
+                    raise ValueError(
+                        f"Unexpected frame size: {frame.shape} "
+                        f"expected ({expected_h}, {expected_w}, 3)"
+                    )
+                return frame
+            except Exception:
+                self._bad_grab_count += 1
+                self.focus(topmost=True)
+                time.sleep(base_backoff_s * (2 ** attempt))
+                bbox = self.get_bbox()
+                expected_h = int(bbox["height"])
+                expected_w = int(bbox["width"])
+        return None
 
     def debug_print(self):
         bbox = self.get_bbox()

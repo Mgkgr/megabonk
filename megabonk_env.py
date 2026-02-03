@@ -134,6 +134,7 @@ class MegabonkEnv(gym.Env):
         ]
 
         self._last_obs = None
+        self._last_frame = None
         self._sticky_dir = 0
         self._sticky_left = 0
         self._last_dead_r_time = 0.0
@@ -147,9 +148,32 @@ class MegabonkEnv(gym.Env):
             di.moveRel(dx, 0, duration=0)
 
     def _grab_frame(self):
+        frame = None
         if self.cap is not None:
-            return self.cap.grab()
-        return np.array(self.sct.grab(self.region))[:, :, :3]
+            try:
+                frame = self.cap.grab()
+            except Exception:
+                frame = None
+            if frame is None or frame.size == 0:
+                try:
+                    self.cap.focus(topmost=True)
+                    time.sleep(0.05)
+                    frame = self.cap.grab()
+                except Exception:
+                    frame = None
+        else:
+            try:
+                frame = np.array(self.sct.grab(self.region))[:, :, :3]
+            except Exception:
+                frame = None
+        if frame is None or frame.size == 0:
+            if self._last_frame is not None:
+                return self._last_frame
+            height = int(self.region["height"])
+            width = int(self.region["width"])
+            return np.zeros((height, width, 3), dtype=np.uint8)
+        self._last_frame = frame
+        return frame
 
     def _to_gray84(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
