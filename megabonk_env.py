@@ -1,21 +1,23 @@
-import time
-import random
-import atexit
-import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
-import mss
-import cv2
-import pydirectinput as di
-from collections import deque
-
-from autopilot import AutoPilot, HeuristicAutoPilot
 from megabonk_bot.dpi import enable_dpi_awareness
-from megabonk_bot.regions import build_regions
-from megabonk_bot.templates import load_templates
-from window_capture import WindowCapture
 
 enable_dpi_awareness()
+
+import time  # noqa: E402
+import random  # noqa: E402
+import atexit  # noqa: E402
+from collections import deque  # noqa: E402
+
+import cv2  # noqa: E402
+import gymnasium as gym  # noqa: E402
+import mss  # noqa: E402
+import numpy as np  # noqa: E402
+import pydirectinput as di  # noqa: E402
+from gymnasium import spaces  # noqa: E402
+
+from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
+from megabonk_bot.regions import build_regions  # noqa: E402
+from megabonk_bot.templates import load_templates  # noqa: E402
+from window_capture import WindowCapture  # noqa: E402
 
 di.PAUSE = 0.0
 di.FAILSAFE = False
