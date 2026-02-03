@@ -80,7 +80,7 @@ class MegabonkEnv(gym.Env):
         include_cam_yaw: bool = True,
         cam_yaw_pixels: int = 80,
         use_heuristic_autopilot: bool = False,
-        dead_r_cooldown: float = 0.6,
+        dead_r_cooldown: float = 1.2,
         reset_sequence=None,
         templates_dir: str | None = "templates",
         regions_builder=build_regions,
@@ -243,11 +243,13 @@ class MegabonkEnv(gym.Env):
             self.autopilot.debug_scores(frame)
             screen = self.autopilot.detect_screen(frame)
             if screen == "DEAD":
+                # DEAD: всегда жмём R, Enter только при явном подтверждающем шаблоне.
                 now = time.time()
                 if now - self._last_dead_r_time >= self.dead_r_cooldown:
                     tap("r", dt=0.01)
-                    time.sleep(0.05)
-                    tap("enter", dt=0.01)
+                    if self.autopilot._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.70):
+                        time.sleep(0.05)
+                        tap("enter", dt=0.01)
                     self._last_dead_r_time = now
                 time.sleep(0.2)
                 f = self._to_gray84(self._grab_frame())
@@ -287,6 +289,7 @@ class MegabonkEnv(gym.Env):
                         did_enter = self.autopilot.ensure_running_fallback_enter(
                             max_enters=max_enters,
                             screen=screen,
+                            death_like=dead_like,
                         )
                         autopilot_action = "enter_fallback" if did_enter else "menu_wait"
                 time.sleep(self.dt)
