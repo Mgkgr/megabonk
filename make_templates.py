@@ -1,10 +1,14 @@
 import os
 import cv2
 
+from megabonk_bot.dpi import enable_dpi_awareness
+
 SRC = r"screen.png"
 OUTDIR = r"templates"
 
 os.makedirs(OUTDIR, exist_ok=True)
+
+enable_dpi_awareness()
 
 img = cv2.imread(SRC)
 if img is None:

@@ -10,9 +10,12 @@ import pydirectinput as di
 from collections import deque
 
 from autopilot import AutoPilot, HeuristicAutoPilot
+from megabonk_bot.dpi import enable_dpi_awareness
 from megabonk_bot.regions import build_regions
 from megabonk_bot.templates import load_templates
 from window_capture import WindowCapture
+
+enable_dpi_awareness()
 
 di.PAUSE = 0.0
 di.FAILSAFE = False
