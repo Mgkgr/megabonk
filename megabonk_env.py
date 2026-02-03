@@ -75,6 +75,7 @@ class MegabonkEnv(gym.Env):
         include_cam_yaw: bool = True,
         cam_yaw_pixels: int = 80,
         use_heuristic_autopilot: bool = False,
+        dead_r_cooldown: float = 0.6,
         reset_sequence=None,
         templates_dir: str | None = "templates",
         regions_builder=build_regions,
@@ -104,6 +105,7 @@ class MegabonkEnv(gym.Env):
         self.include_cam_yaw = include_cam_yaw
         self.cam_yaw_pixels = int(cam_yaw_pixels)
         self.use_heuristic_autopilot = use_heuristic_autopilot
+        self.dead_r_cooldown = float(dead_r_cooldown)
 
         if self.include_cam_yaw:
             self.action_space = spaces.MultiDiscrete([9, 3, 2, 2])
@@ -134,6 +136,7 @@ class MegabonkEnv(gym.Env):
         self._last_obs = None
         self._sticky_dir = 0
         self._sticky_left = 0
+        self._last_dead_r_time = 0.0
 
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
@@ -211,7 +214,12 @@ class MegabonkEnv(gym.Env):
             self.autopilot.debug_scores(frame)
             screen = self.autopilot.detect_screen(frame)
             if screen == "DEAD":
-                tap("enter", dt=0.01)
+                now = time.time()
+                if now - self._last_dead_r_time >= self.dead_r_cooldown:
+                    tap("r", dt=0.01)
+                    time.sleep(0.05)
+                    tap("enter", dt=0.01)
+                    self._last_dead_r_time = now
                 time.sleep(0.2)
                 f = self._to_gray84(self._grab_frame())
                 self.frames.append(f)
@@ -223,7 +231,7 @@ class MegabonkEnv(gym.Env):
                     "r_dmg": 0.0,
                     "xp_fill": 0.0,
                     "hp_fill": 0.0,
-                    "autopilot": "dead_enter",
+                    "autopilot": "dead_r",
                 }
                 return obs, -1.0, True, False, info
             if screen in ("MAIN_MENU", "CHAR_SELECT", "UNKNOWN"):
