@@ -10,7 +10,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
     "gold": (0.85, 0.02, 0.12, 0.05),
-    "time": (0.41, 0.01, 0.18, 0.06),
+    "time": (0.39, 0.012, 0.22, 0.06),
 }
 
 
@@ -34,6 +34,8 @@ def _resolve_region(frame, regions, key):
 
 def _preprocess_for_ocr(roi_bgr, *, scale=3.0, adaptive=False):
     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    gray = clahe.apply(gray)
     resized = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     blur = cv2.GaussianBlur(resized, (3, 3), 0)
     if adaptive:
@@ -83,7 +85,7 @@ def _ocr_text(image, whitelist, psm=7):
 
 
 def _iter_preprocessed(roi_bgr):
-    for scale in (2.5, 3.0):
+    for scale in (2.5, 3.0, 3.5, 4.0):
         yield _preprocess_for_ocr(roi_bgr, scale=scale, adaptive=False)
         yield _preprocess_for_ocr(roi_bgr, scale=scale, adaptive=True)
 
