@@ -539,8 +539,10 @@ class MegabonkEnv(gym.Env):
                 # DEAD: всегда жмём R, Enter только при явном подтверждающем шаблоне.
                 now = time.time()
                 if now - self._last_dead_r_time >= self.dead_r_cooldown:
-                    tap("r", dt=0.01)
-                    if self.autopilot._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.70):
+                    key_on("r")
+                    time.sleep(0.12)
+                    key_off("r")
+                    if self.autopilot._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.50):
                         time.sleep(0.05)
                         tap("enter", dt=0.01)
                     self._last_dead_r_time = now
