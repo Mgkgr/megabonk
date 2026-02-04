@@ -540,7 +540,7 @@ class MegabonkEnv(gym.Env):
                 now = time.time()
                 if now - self._last_dead_r_time >= self.dead_r_cooldown:
                     tap("r", dt=0.01)
-                    if self.autopilot._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.70):
+                    if self.autopilot._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.50):
                         time.sleep(0.05)
                         tap("enter", dt=0.01)
                     self._last_dead_r_time = now
