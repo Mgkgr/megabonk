@@ -73,7 +73,8 @@ SWP_SHOWWINDOW = 0x0040
 
 def find_hwnd_by_title_substr(title_substr: str) -> int | None:
     target = title_substr.lower().strip()
-    found = {"hwnd": None}
+    found = {"hwnd": None, "title": None}
+    substring_matches: list[tuple[int, str, int]] = []
 
     def enum_proc(hwnd, lparam):
         if not user32.IsWindowVisible(hwnd):
@@ -87,13 +88,22 @@ def find_hwnd_by_title_substr(title_substr: str) -> int | None:
         user32.GetWindowTextW(hwnd, buf, length + 1)
         title = buf.value
 
-        if target in title.lower():
+        title_lower = title.lower()
+        if target == title_lower:
             found["hwnd"] = hwnd
+            found["title"] = title
             return False
+        if target in title_lower:
+            substring_matches.append((len(title_lower), title, hwnd))
         return True
 
     cb = WNDENUMPROC(enum_proc)
     user32.EnumWindows(cb, 0)
+    if found["hwnd"]:
+        return found["hwnd"]
+    if substring_matches:
+        substring_matches.sort(key=lambda item: item[0])
+        return substring_matches[0][2]
     return found["hwnd"]
 
 
