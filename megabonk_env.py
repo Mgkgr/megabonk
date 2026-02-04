@@ -57,8 +57,6 @@ def release_all_keys():
         "space",
         "lctrl",
         "shift",
-        "enter",
-        "esc",
     ]:
         try:
             di.keyUp(k)
@@ -389,10 +387,7 @@ class MegabonkEnv(gym.Env):
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
-            ("tap", "esc", 0.05),
             ("tap", "r", 0.05),
-            ("sleep", None, 0.4),
-            ("tap", "enter", 0.05),
             ("sleep", None, 0.6),
         ]
 
@@ -604,9 +599,6 @@ class MegabonkEnv(gym.Env):
                     key_on("r")
                     time.sleep(0.12)
                     key_off("r")
-                    if self.autopilot._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.50):
-                        time.sleep(0.05)
-                        tap("enter", dt=0.01)
                     self._last_dead_r_time = now
                 time.sleep(0.2)
                 f = self._to_gray84(self._grab_frame())
@@ -629,8 +621,6 @@ class MegabonkEnv(gym.Env):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
-                di.keyUp("enter")
-                di.keyUp("esc")
                 self._sticky_dir = 0
                 self._sticky_left = 0
                 time.sleep(self.dt)
@@ -654,8 +644,6 @@ class MegabonkEnv(gym.Env):
                 set_move(0)
                 key_off(self.jump_key)
                 key_off(self.slide_key)
-                di.keyUp("enter")
-                di.keyUp("esc")
                 self._sticky_dir = 0
                 self._sticky_left = 0
                 if screen == "CHAR_SELECT":
@@ -665,25 +653,12 @@ class MegabonkEnv(gym.Env):
                     acted = self.autopilot.ensure_running(frame)
                     if acted:
                         autopilot_action = "menu_click"
-                    elif screen == "UNKNOWN":
-                        autopilot_action = "menu_wait_unknown"
-                        time.sleep(self.dt)
                     else:
-                        dead_like = is_death_like(
-                            self._to_gray84(frame),
-                            frame_bgr=frame,
-                            templates=self.templates,
-                            regions=self.regions,
-                            death_tpl_names=self._death_tpl_names,
-                            confirm_tpl_names=self._confirm_tpl_names,
-                        )
-                        max_enters = 1 if dead_like else 6
-                        did_enter = self.autopilot.ensure_running_fallback_enter(
-                            max_enters=max_enters,
-                            screen=screen,
-                            death_like=dead_like,
-                        )
-                        autopilot_action = "enter_fallback" if did_enter else "menu_wait"
+                        if screen == "UNKNOWN":
+                            autopilot_action = "menu_wait_unknown"
+                        else:
+                            autopilot_action = "menu_wait"
+                        time.sleep(self.dt)
                 time.sleep(self.dt)
                 f = self._to_gray84(self._grab_frame())
                 self.frames.append(f)
@@ -702,7 +677,7 @@ class MegabonkEnv(gym.Env):
                 }
                 return obs, 0.0, False, False, info
             if screen == "RUNNING":
-                self.autopilot.reset_enter_series()
+                pass
 
         yaw = 1
         pitch = 1
