@@ -18,7 +18,11 @@ from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
 from megabonk_bot.hud import read_hud_values  # noqa: E402
-from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
+from megabonk_bot.recognition import (  # noqa: E402
+    analyze_scene,
+    draw_hud_overlay_frame,
+    draw_recognition_overlay,
+)
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -76,6 +80,10 @@ HWND_NOTOPMOST = -2
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_SHOWWINDOW = 0x0040
+GWL_EXSTYLE = -20
+WS_EX_LAYERED = 0x00080000
+WS_EX_TRANSPARENT = 0x00000020
+LWA_COLORKEY = 0x00000001
 
 
 def _set_window_topmost(window_name: str, topmost: bool = True) -> bool:
@@ -97,6 +105,45 @@ def _set_window_topmost(window_name: str, topmost: bool = True) -> bool:
             0,
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+    )
+
+
+def _set_window_transparent(window_name: str, colorkey=(0, 0, 0)) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    exstyle = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    exstyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
+    r, g, b = colorkey
+    colorref = int(r) | (int(g) << 8) | (int(b) << 16)
+    return bool(user32.SetLayeredWindowAttributes(hwnd, colorref, 0, LWA_COLORKEY))
+
+
+def _move_window(window_name: str, x: int, y: int, w: int, h: int) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    return bool(
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            int(x),
+            int(y),
+            int(w),
+            int(h),
+            SWP_SHOWWINDOW,
         )
     )
 
@@ -368,6 +415,7 @@ class MegabonkEnv(gym.Env):
         debug_recognition_show: bool = False,
         debug_recognition_window: str = "Megabonk Recognition",
         debug_recognition_topmost: bool = True,
+        debug_recognition_transparent: bool = True,
         hud_ocr_every_s: float = 0.5,
     ):
         super().__init__()
@@ -433,8 +481,10 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition_show = bool(debug_recognition_show)
         self.debug_recognition_window = debug_recognition_window
         self.debug_recognition_topmost = bool(debug_recognition_topmost)
+        self.debug_recognition_transparent = bool(debug_recognition_transparent)
         self.hud_ocr_every_s = float(hud_ocr_every_s)
         self._dbg_recognition_topmost_set = False
+        self._dbg_recognition_transparent_set = False
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
@@ -514,7 +564,31 @@ class MegabonkEnv(gym.Env):
         Path(self.debug_recognition_dir).mkdir(exist_ok=True)
         cv2.imwrite(f"{self.debug_recognition_dir}/recognition_{int(now)}.png", overlay)
         if self.debug_recognition_show:
-            cv2.imshow(self.debug_recognition_window, overlay)
+            if self.debug_recognition_transparent:
+                hud_only = draw_hud_overlay_frame(
+                    frame,
+                    hud_values=hud_values,
+                    hud_regions=self.regions,
+                )
+                cv2.imshow(self.debug_recognition_window, hud_only)
+                if (
+                    self.cap is not None
+                    and _move_window(
+                        self.debug_recognition_window,
+                        self.region["left"],
+                        self.region["top"],
+                        self.region["width"],
+                        self.region["height"],
+                    )
+                ):
+                    pass
+                if not self._dbg_recognition_transparent_set:
+                    if _set_window_transparent(
+                        self.debug_recognition_window, colorkey=(0, 0, 0)
+                    ):
+                        self._dbg_recognition_transparent_set = True
+            else:
+                cv2.imshow(self.debug_recognition_window, overlay)
             cv2.waitKey(1)
             if self.debug_recognition_topmost and not self._dbg_recognition_topmost_set:
                 if _set_window_topmost(self.debug_recognition_window, topmost=True):

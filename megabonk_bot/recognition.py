@@ -212,6 +212,22 @@ def draw_recognition_overlay(
     return canvas
 
 
+def draw_hud_overlay_frame(
+    frame_bgr: np.ndarray,
+    *,
+    hud_values: dict | None = None,
+    hud_regions: dict | None = None,
+    hud_alpha: float = 0.55,
+) -> np.ndarray:
+    if hud_values is None:
+        hud_values = {"hp": None, "gold": None, "time": None}
+    canvas = np.zeros_like(frame_bgr)
+    overlay = canvas.copy()
+    _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions)
+    cv2.addWeighted(overlay, hud_alpha, canvas, 1 - hud_alpha, 0, canvas)
+    return canvas
+
+
 def _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions):
     for key, value in hud_values.items():
         rect = _resolve_hud_region(frame_bgr, hud_regions, key)
