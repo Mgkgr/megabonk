@@ -335,6 +335,8 @@ class MegabonkEnv(gym.Env):
         debug_recognition_dir: str = "dbg",
         debug_recognition_every_s: float = 2.0,
         recognition_grid: tuple[int, int] = (12, 20),
+        debug_recognition_show: bool = True,
+        debug_recognition_window: str = "Megabonk Recognition",
     ):
         super().__init__()
         self.cap = cap
@@ -395,6 +397,8 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition_dir = debug_recognition_dir
         self.debug_recognition_every_s = float(debug_recognition_every_s)
         self.recognition_grid = recognition_grid
+        self.debug_recognition_show = bool(debug_recognition_show)
+        self.debug_recognition_window = debug_recognition_window
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
@@ -461,6 +465,9 @@ class MegabonkEnv(gym.Env):
         overlay = draw_recognition_overlay(frame, analysis)
         Path(self.debug_recognition_dir).mkdir(exist_ok=True)
         cv2.imwrite(f"{self.debug_recognition_dir}/recognition_{int(now)}.png", overlay)
+        if self.debug_recognition_show:
+            cv2.imshow(self.debug_recognition_window, overlay)
+            cv2.waitKey(1)
 
     def _read_hud(self, frame, every_s=0.0):
         if every_s > 0.0:
