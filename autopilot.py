@@ -87,7 +87,7 @@ class AutoPilot:
             return "DEAD"
         if self._seen(frame, "tpl_dead", "REG_DEAD", 0.35) and is_death_like_frame(frame):
             return "DEAD"
-        if is_death_like_frame(frame) and self._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.60):
+        if self._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.50):
             return "DEAD"
         if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.60):
             return "CHAR_SELECT"
