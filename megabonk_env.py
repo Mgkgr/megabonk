@@ -368,6 +368,7 @@ class MegabonkEnv(gym.Env):
         debug_recognition_show: bool = True,
         debug_recognition_window: str = "Megabonk Recognition",
         debug_recognition_topmost: bool = True,
+        hud_ocr_every_s: float = 0.5,
     ):
         super().__init__()
         self.cap = cap
@@ -412,8 +413,9 @@ class MegabonkEnv(gym.Env):
         self.autopilot = None
         self.heuristic_pilot = None
         self.templates = load_templates(templates_dir) if templates_dir else {}
+        self._regions_builder = regions_builder
         self.regions = (
-            regions_builder(self.region["width"], self.region["height"])
+            self._regions_builder(self.region["width"], self.region["height"])
             if templates_dir
             else {}
         )
@@ -431,6 +433,7 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition_show = bool(debug_recognition_show)
         self.debug_recognition_window = debug_recognition_window
         self.debug_recognition_topmost = bool(debug_recognition_topmost)
+        self.hud_ocr_every_s = float(hud_ocr_every_s)
         self._dbg_recognition_topmost_set = False
 
         # как “перезапускать” ран (подстроишь под меню)
@@ -587,8 +590,18 @@ class MegabonkEnv(gym.Env):
             height = int(self.region["height"])
             width = int(self.region["width"])
             return np.zeros((height, width, 3), dtype=np.uint8)
+        self._refresh_regions_for_frame(frame)
         self._last_frame = frame
         return frame
+
+    def _refresh_regions_for_frame(self, frame):
+        h, w = frame.shape[:2]
+        if self.region["width"] == w and self.region["height"] == h:
+            return
+        self.region["width"] = w
+        self.region["height"] = h
+        if self.regions:
+            self.regions = self._regions_builder(w, h)
 
     def _to_gray84(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -662,7 +675,7 @@ class MegabonkEnv(gym.Env):
         if self.autopilot:
             self.autopilot.debug_scores(frame)
             self._debug_death_like(frame)
-            hud_values = self._read_hud(frame, every_s=2.0)
+            hud_values = self._read_hud(frame, every_s=self.hud_ocr_every_s)
             if hud_values is not None:
                 self.autopilot.debug_hud(hud_values)
             screen = self.autopilot.detect_screen(frame)
