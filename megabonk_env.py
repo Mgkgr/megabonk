@@ -17,6 +17,7 @@ from gymnasium import spaces  # noqa: E402
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
+from megabonk_bot.vision import find_in_region  # noqa: E402
 from window_capture import WindowCapture  # noqa: E402
 
 di.PAUSE = 0.0
@@ -51,15 +52,81 @@ def release_all_keys():
 
 atexit.register(release_all_keys)
 
-# ---- детектор смерти/меню (очень грубо) ----
-def is_death_like(frame_gray_84):
-    # Заглушка: если экран очень тёмный/однородный, считаем смерть/меню.
-    # Под себя лучше заменить на:
-    # - шаблон (template matching) по слову "DEAD"/"GAME OVER"
-    # - или проверку пикселей в точках HUD
+DEATH_TPL_HINTS = ("dead", "game_over", "gameover", "death")
+
+
+def _pick_death_templates(templates):
+    if not templates:
+        return []
+    return [
+        name
+        for name in templates
+        if any(hint in name.lower() for hint in DEATH_TPL_HINTS)
+    ]
+
+
+def _patch_mean(gray, cx, cy, half=1):
+    h, w = gray.shape[:2]
+    x0 = max(0, cx - half)
+    y0 = max(0, cy - half)
+    x1 = min(w, cx + half + 1)
+    y1 = min(h, cy + half + 1)
+    if x0 >= x1 or y0 >= y1:
+        return 0.0
+    return float(gray[y0:y1, x0:x1].mean())
+
+
+def _hud_pixels_dark(gray84):
+    h, w = gray84.shape[:2]
+    points = [
+        (int(w * 0.85), int(h * 0.06)),
+        (int(w * 0.92), int(h * 0.08)),
+        (int(w * 0.78), int(h * 0.05)),
+        (int(w * 0.08), int(h * 0.05)),
+    ]
+    values = [_patch_mean(gray84, cx, cy, half=1) for cx, cy in points]
+    return float(np.mean(values)) < 45.0
+
+
+def is_death_like(
+    frame_gray_84,
+    frame_bgr=None,
+    templates=None,
+    regions=None,
+    death_tpl_names=None,
+    hard_tpl_threshold=0.62,
+    soft_tpl_threshold=0.50,
+):
+    """Грубая детекция смерти/меню.
+
+    1) Ищем шаблоны UI (“DEAD”/“GAME OVER”) в REG_DEAD с порогами.
+    2) Проверяем фиксированные пиксели HUD (если они темнеют — чаще меню/смерть).
+    3) Дополнительно фильтруем по средней яркости/дисперсии всего кадра.
+    """
+    best_score = 0.0
+    if frame_bgr is not None and templates and regions:
+        region = regions.get("REG_DEAD")
+        if region:
+            names = death_tpl_names or _pick_death_templates(templates)
+            for name in names:
+                tpl = templates.get(name)
+                if tpl is None:
+                    continue
+                found, _, score = find_in_region(
+                    frame_bgr, tpl, region, threshold=hard_tpl_threshold
+                )
+                best_score = max(best_score, float(score))
+                if found:
+                    return True
+
     mean = float(frame_gray_84.mean())
     std = float(frame_gray_84.std())
-    return (mean < 25 and std < 8)
+    dark_overlay = mean < 38.0 and std < 14.0
+    hud_dark = _hud_pixels_dark(frame_gray_84)
+
+    if best_score >= soft_tpl_threshold and (dark_overlay or hud_dark):
+        return True
+    return dark_overlay and hud_dark
 
 class MegabonkEnv(gym.Env):
     """
@@ -122,10 +189,15 @@ class MegabonkEnv(gym.Env):
 
         self.autopilot = None
         self.heuristic_pilot = None
+        self.templates = load_templates(templates_dir) if templates_dir else {}
+        self.regions = (
+            regions_builder(self.region["width"], self.region["height"])
+            if templates_dir
+            else {}
+        )
+        self._death_tpl_names = _pick_death_templates(self.templates)
         if templates_dir:
-            templates = load_templates(templates_dir)
-            regions = regions_builder(self.region["width"], self.region["height"])
-            self.autopilot = AutoPilot(templates=templates, regions=regions)
+            self.autopilot = AutoPilot(templates=self.templates, regions=self.regions)
         if self.use_heuristic_autopilot:
             self.heuristic_pilot = HeuristicAutoPilot()
 
@@ -219,14 +291,22 @@ class MegabonkEnv(gym.Env):
 
         # ждём, пока не будет “похоже на игру”
         self.frames.clear()
-        f = self._to_gray84(self._grab_frame())
+        frame = self._grab_frame()
+        f = self._to_gray84(frame)
         self.frames.append(f)
         obs = self._get_obs()
         t0 = time.time()
         while time.time() - t0 < 6.0:
-            f = self._to_gray84(self._grab_frame())
+            frame = self._grab_frame()
+            f = self._to_gray84(frame)
             self.frames.append(f)
-            if not is_death_like(f):
+            if not is_death_like(
+                f,
+                frame_bgr=frame,
+                templates=self.templates,
+                regions=self.regions,
+                death_tpl_names=self._death_tpl_names,
+            ):
                 break
             time.sleep(0.1)
 
@@ -284,7 +364,13 @@ class MegabonkEnv(gym.Env):
                         autopilot_action = "menu_wait_unknown"
                         time.sleep(self.dt)
                     else:
-                        dead_like = is_death_like(self._to_gray84(frame))
+                        dead_like = is_death_like(
+                            self._to_gray84(frame),
+                            frame_bgr=frame,
+                            templates=self.templates,
+                            regions=self.regions,
+                            death_tpl_names=self._death_tpl_names,
+                        )
                         max_enters = 1 if dead_like else 6
                         did_enter = self.autopilot.ensure_running_fallback_enter(
                             max_enters=max_enters,
@@ -350,9 +436,16 @@ class MegabonkEnv(gym.Env):
         frame_skip = random.randint(*self.frame_skip_range)
         for _ in range(frame_skip):
             time.sleep(self.dt)
-            f = self._to_gray84(self._grab_frame())
+            frame_bgr = self._grab_frame()
+            f = self._to_gray84(frame_bgr)
             self.frames.append(f)
-            if is_death_like(f):
+            if is_death_like(
+                f,
+                frame_bgr=frame_bgr,
+                templates=self.templates,
+                regions=self.regions,
+                death_tpl_names=self._death_tpl_names,
+            ):
                 terminated = True
                 r_alive = -1.0
                 break
