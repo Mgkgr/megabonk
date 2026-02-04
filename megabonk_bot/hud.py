@@ -1,11 +1,19 @@
 import importlib.util
 import logging
+import os
 import re
+import time
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 LOGGER = logging.getLogger(__name__)
+
+_TESSERACT_MISSING = False
+_TESSERACT_LAST_WARNED_AT = 0.0
+_TESSERACT_CONFIGURED = False
+_TESSERACT_WARNING_INTERVAL = 60.0
 
 DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
@@ -15,11 +23,32 @@ DEFAULT_HUD_REGIONS = {
 
 
 def _get_tesseract():
+    global _TESSERACT_CONFIGURED
+    if _TESSERACT_MISSING:
+        return None
     if importlib.util.find_spec("pytesseract") is None:
         return None
     import pytesseract
-
+    if not _TESSERACT_CONFIGURED:
+        cmd_from_env = os.getenv("TESSERACT_CMD")
+        if cmd_from_env:
+            pytesseract.pytesseract.tesseract_cmd = cmd_from_env
+        elif os.name == "nt":
+            default_cmd = Path(
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+            )
+            if default_cmd.exists():
+                pytesseract.pytesseract.tesseract_cmd = str(default_cmd)
+        _TESSERACT_CONFIGURED = True
     return pytesseract
+
+
+def _warn_missing_tesseract():
+    global _TESSERACT_LAST_WARNED_AT
+    now = time.monotonic()
+    if now - _TESSERACT_LAST_WARNED_AT >= _TESSERACT_WARNING_INTERVAL:
+        LOGGER.warning("Tesseract OCR не найден — проверьте установку и PATH")
+        _TESSERACT_LAST_WARNED_AT = now
 
 
 def _resolve_region(frame, regions, key):
@@ -57,13 +86,19 @@ def _preprocess_for_ocr(roi_bgr, *, scale=3.0, adaptive=False):
 
 
 def _ocr_text(image, whitelist, psm=7):
+    global _TESSERACT_MISSING
     pytesseract = _get_tesseract()
     if pytesseract is None:
         return None, None
     config = f"--psm {psm} -c tessedit_char_whitelist={whitelist}"
-    data = pytesseract.image_to_data(
-        image, config=config, output_type=pytesseract.Output.DICT
-    )
+    try:
+        data = pytesseract.image_to_data(
+            image, config=config, output_type=pytesseract.Output.DICT
+        )
+    except pytesseract.TesseractNotFoundError:
+        _TESSERACT_MISSING = True
+        _warn_missing_tesseract()
+        return None, None
     if not data.get("text"):
         return None, None
     best_idx = None
@@ -80,7 +115,12 @@ def _ocr_text(image, whitelist, psm=7):
             best_conf = conf
             best_idx = idx
     if best_idx is None:
-        raw = pytesseract.image_to_string(image, config=config).strip()
+        try:
+            raw = pytesseract.image_to_string(image, config=config).strip()
+        except pytesseract.TesseractNotFoundError:
+            _TESSERACT_MISSING = True
+            _warn_missing_tesseract()
+            return None, None
         if not raw:
             return None, None
         return raw, 0.0
@@ -137,7 +177,10 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
 
     pytesseract = _get_tesseract()
     if pytesseract is None:
-        LOGGER.debug("pytesseract не найден — HUD OCR отключён")
+        if _TESSERACT_MISSING:
+            _warn_missing_tesseract()
+        else:
+            LOGGER.debug("pytesseract не найден — HUD OCR отключён")
         return {"hp": None, "gold": None, "time": None}
 
     results = {}
