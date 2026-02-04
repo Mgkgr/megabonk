@@ -2,6 +2,7 @@ from megabonk_bot.dpi import enable_dpi_awareness
 
 enable_dpi_awareness()
 
+import ctypes  # noqa: E402
 import time  # noqa: E402
 import random  # noqa: E402
 import atexit  # noqa: E402
@@ -69,6 +70,35 @@ atexit.register(release_all_keys)
 
 DEATH_TPL_HINTS = ("dead", "game_over", "gameover", "death")
 CONFIRM_TPL_HINTS = ("confirm",)
+
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_SHOWWINDOW = 0x0040
+
+
+def _set_window_topmost(window_name: str, topmost: bool = True) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    insert_after = HWND_TOPMOST if topmost else HWND_NOTOPMOST
+    return bool(
+        user32.SetWindowPos(
+            hwnd,
+            insert_after,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+    )
 
 
 def _pick_death_templates(templates):
@@ -337,6 +367,7 @@ class MegabonkEnv(gym.Env):
         recognition_grid: tuple[int, int] = (12, 20),
         debug_recognition_show: bool = True,
         debug_recognition_window: str = "Megabonk Recognition",
+        debug_recognition_topmost: bool = True,
     ):
         super().__init__()
         self.cap = cap
@@ -399,6 +430,8 @@ class MegabonkEnv(gym.Env):
         self.recognition_grid = recognition_grid
         self.debug_recognition_show = bool(debug_recognition_show)
         self.debug_recognition_window = debug_recognition_window
+        self.debug_recognition_topmost = bool(debug_recognition_topmost)
+        self._dbg_recognition_topmost_set = False
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
@@ -468,6 +501,9 @@ class MegabonkEnv(gym.Env):
         if self.debug_recognition_show:
             cv2.imshow(self.debug_recognition_window, overlay)
             cv2.waitKey(1)
+            if self.debug_recognition_topmost and not self._dbg_recognition_topmost_set:
+                if _set_window_topmost(self.debug_recognition_window, topmost=True):
+                    self._dbg_recognition_topmost_set = True
 
     def _read_hud(self, frame, every_s=0.0):
         if every_s > 0.0:
