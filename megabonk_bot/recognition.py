@@ -220,8 +220,10 @@ def draw_recognition_overlay(
             _draw_labeled_box(canvas, region.rect, region.label, region.color)
     if hud_values is not None:
         hud_overlay = canvas.copy()
-        _draw_hud_overlay(canvas, hud_overlay, frame_bgr, hud_values, hud_regions)
+        labels = _draw_hud_overlay(hud_overlay, frame_bgr, hud_values, hud_regions)
         cv2.addWeighted(hud_overlay, hud_alpha, canvas, 1 - hud_alpha, 0, canvas)
+        for rect, label, color in labels:
+            _draw_labeled_box(canvas, rect, label, color)
     return canvas
 
 
@@ -236,12 +238,17 @@ def draw_hud_overlay_frame(
         hud_values = {"hp": None, "gold": None, "time": None}
     canvas = np.zeros_like(frame_bgr)
     overlay = canvas.copy()
-    _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions)
+    labels = _draw_hud_overlay(overlay, frame_bgr, hud_values, hud_regions)
     cv2.addWeighted(overlay, hud_alpha, canvas, 1 - hud_alpha, 0, canvas)
+    for rect, label, color in labels:
+        _draw_labeled_box(canvas, rect, label, color)
     return canvas
 
 
-def _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions):
+def _draw_hud_overlay(
+    overlay, frame_bgr, hud_values, hud_regions
+) -> list[tuple[tuple[int, int, int, int], str, tuple[int, int, int]]]:
+    labels = []
     for key, value in hud_values.items():
         rect = _resolve_hud_region(frame_bgr, hud_regions, key)
         if rect is None:
@@ -251,7 +258,8 @@ def _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions):
         cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
         value_label = value if value is not None else "?"
         label = f"{key}:{value_label} ({x},{y},{w},{h})"
-        _draw_labeled_box(canvas, rect, label, color)
+        labels.append((rect, label, color))
+    return labels
 
 
 def _resolve_hud_region(frame_bgr, regions, key):
