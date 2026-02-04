@@ -80,7 +80,10 @@ def _ocr_text(image, whitelist, psm=7):
             best_conf = conf
             best_idx = idx
     if best_idx is None:
-        return None, None
+        raw = pytesseract.image_to_string(image, config=config).strip()
+        if not raw:
+            return None, None
+        return raw, 0.0
     return data["text"][best_idx].strip(), best_conf
 
 
@@ -138,7 +141,6 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
         return {"hp": None, "gold": None, "time": None}
 
     results = {}
-    soft_conf = min_conf * 0.6
     for key, whitelist in (
         ("hp", "0123456789"),
         ("gold", "0123456789"),
@@ -150,8 +152,14 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
             results[key] = None
             continue
         text, conf = _best_ocr(roi, whitelist=whitelist)
-        if text is None or conf is None or conf < min_conf:
-            if text is None or conf is None or conf < soft_conf:
+        if key == "time":
+            key_min_conf = min_conf * 0.5
+            key_soft_conf = min_conf * 0.25
+        else:
+            key_min_conf = min_conf
+            key_soft_conf = min_conf * 0.6
+        if text is None or conf is None or conf < key_min_conf:
+            if text is None or conf is None or conf < key_soft_conf:
                 results[key] = None
                 continue
         if key == "time":
