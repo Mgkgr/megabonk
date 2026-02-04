@@ -10,6 +10,46 @@ from megabonk_bot.vision import find_in_region
 di.PAUSE = 0.0
 di.FAILSAFE = False
 
+AUTOPILOT_SCENARIOS = {
+    "DEAD": {
+        "templates": ["tpl_dead", "tpl_confirm"],
+        "regions": ["REG_DEAD", "REG_DEAD_CONFIRM"],
+    },
+    "CHAR_SELECT": {
+        "templates": ["tpl_char_select_title", "tpl_fox_face", "tpl_confirm"],
+        "regions": ["REG_CHAR_SELECT", "REG_CHAR_GRID", "REG_CHAR_CONFIRM"],
+    },
+    "MAIN_MENU": {
+        "templates": ["tpl_play"],
+        "regions": ["REG_MAIN_PLAY"],
+    },
+    "UNLOCKS_WEAPONS": {
+        "templates": ["tpl_unlocks_title"],
+        "regions": ["REG_UNLOCKS"],
+    },
+    "CHEST_WEAPON_PICK": {
+        "templates": ["tpl_katana", "tpl_dexec"],
+        "regions": ["REG_CHEST"],
+    },
+    "CHEST_FOLIANT_PICK": {
+        "templates": [
+            "tpl_foliant_bottom1",
+            "tpl_foliant_bottom2",
+            "tpl_foliant_bottom3",
+            "tpl_blood_tome",
+        ],
+        "regions": ["REG_CHEST"],
+    },
+    "RUNNING": {
+        "templates": ["tpl_lvl", "tpl_minimap"],
+        "regions": ["REG_HUD", "REG_MINIMAP"],
+    },
+}
+
+REQUIRED_TEMPLATES = sorted(
+    {tpl for scenario in AUTOPILOT_SCENARIOS.values() for tpl in scenario["templates"]}
+)
+
 
 def click(x, y, delay=0.05):
     di.moveTo(x, y)
@@ -35,6 +75,7 @@ class AutoPilot:
     def __init__(self, templates, regions):
         self.t = templates
         self.r = regions
+        self.missing_templates = [tpl for tpl in REQUIRED_TEMPLATES if tpl not in templates]
         self.enter_budget = 0
         self.enter_last_ts = 0.0
         self.enter_cooldown = 0.35
