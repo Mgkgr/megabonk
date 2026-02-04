@@ -232,6 +232,15 @@ class AutoPilot:
         death_like = is_death_like_frame(frame)
         print(f"[DBG] DEATH_LIKE ok={death_like}")
 
+    def debug_hud(self, hud_values):
+        if not hud_values:
+            print("[DBG] HUD hp=None gold=None time=None")
+            return
+        hp = hud_values.get("hp")
+        gold = hud_values.get("gold")
+        time_val = hud_values.get("time")
+        print(f"[DBG] HUD hp={hp} gold={gold} time={time_val}")
+
     def _seen(self, frame, tpl_name, reg_name, thr):
         ok, _, _ = self._find(frame, tpl_name, reg_name, thr)
         return ok

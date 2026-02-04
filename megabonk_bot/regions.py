@@ -48,6 +48,24 @@ def build_regions(width, height):
             int(0.30 * width),
             int(0.12 * height),
         ),
+        "REG_HUD_HP": (
+            int(0.04 * width),
+            int(0.02 * height),
+            int(0.12 * width),
+            int(0.05 * height),
+        ),
+        "REG_HUD_GOLD": (
+            int(0.85 * width),
+            int(0.02 * height),
+            int(0.12 * width),
+            int(0.05 * height),
+        ),
+        "REG_HUD_TIME": (
+            int(0.45 * width),
+            int(0.02 * height),
+            int(0.10 * width),
+            int(0.05 * height),
+        ),
         "REG_MINIMAP": (
             int(0.80 * width),
             int(0.05 * height),
