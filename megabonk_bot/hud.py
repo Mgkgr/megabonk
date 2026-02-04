@@ -13,6 +13,7 @@ LOGGER = logging.getLogger(__name__)
 _TESSERACT_LAST_ERROR_AT = None
 _TESSERACT_LAST_WARNED_AT = 0.0
 _TESSERACT_CONFIGURED = False
+_TESSERACT_CONFIGURED_LOGGED = False
 _TESSERACT_WARNING_INTERVAL = 60.0
 _TESSERACT_RETRY_INTERVAL = 30.0
 
@@ -25,6 +26,7 @@ DEFAULT_HUD_REGIONS = {
 
 def _get_tesseract():
     global _TESSERACT_CONFIGURED, _TESSERACT_LAST_ERROR_AT
+    global _TESSERACT_CONFIGURED_LOGGED
     if _TESSERACT_LAST_ERROR_AT is not None:
         if time.monotonic() - _TESSERACT_LAST_ERROR_AT < _TESSERACT_RETRY_INTERVAL:
             return None
@@ -43,6 +45,23 @@ def _get_tesseract():
             if default_cmd.exists():
                 pytesseract.pytesseract.tesseract_cmd = str(default_cmd)
         _TESSERACT_CONFIGURED = True
+    if not _TESSERACT_CONFIGURED_LOGGED:
+        languages = None
+        version = None
+        try:
+            languages = pytesseract.get_languages(config="")
+        except Exception:
+            try:
+                version = pytesseract.get_tesseract_version()
+            except Exception:
+                version = "unknown"
+        LOGGER.info(
+            "Tesseract OCR: cmd=%s, languages=%s, version=%s",
+            pytesseract.pytesseract.tesseract_cmd,
+            languages,
+            version,
+        )
+        _TESSERACT_CONFIGURED_LOGGED = True
     _TESSERACT_LAST_ERROR_AT = None
     return pytesseract
 
