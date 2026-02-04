@@ -153,6 +153,10 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
             continue
         text, conf = _best_ocr(roi, whitelist=whitelist)
         if key == "time":
+            value = _parse_time(text) if text else None
+            if value is not None:
+                results[key] = value
+                continue
             key_min_conf = min_conf * 0.5
             key_soft_conf = min_conf * 0.25
         else:
