@@ -62,9 +62,14 @@ class AutoPilot:
         time.sleep(0.01)
         di.keyUp("enter")
 
-    def ensure_running_fallback_enter(self, max_enters=6, screen=None, frame=None):
+    def ensure_running_fallback_enter(
+        self, max_enters=6, screen=None, frame=None, death_like=False
+    ):
         if screen is None and frame is not None:
             screen = self.detect_screen(frame)
+        if screen == "DEAD" or death_like:
+            self.reset_enter_series()
+            return False
         if screen == "CHAR_SELECT":
             self.reset_enter_series()
             return False
