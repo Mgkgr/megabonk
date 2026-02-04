@@ -126,7 +126,8 @@ def is_death_like(
     confirm_tpl_names=None,
     hard_tpl_threshold=0.62,
     soft_tpl_threshold=0.50,
-    confirm_threshold=0.62,
+    confirm_threshold=0.48,
+    confirm_mean_threshold=95.0,
     debug_info=None,
 ):
     """Грубая детекция смерти/меню.
@@ -169,6 +170,7 @@ def is_death_like(
     dark_overlay = mean < 38.0 and std < 14.0
     hud_mean = _hud_pixels_mean(frame_gray_84)
     hud_dark = hud_mean < 45.0
+    confirm_bright_ok = mean < confirm_mean_threshold
 
     if frame_bgr is not None and templates and regions:
         region = regions.get("REG_DEAD_CONFIRM")
@@ -185,7 +187,7 @@ def is_death_like(
                 if score > confirm_score:
                     confirm_score = score
                     confirm_tpl = name
-                if found and (dark_overlay or hud_dark):
+                if found and (dark_overlay or hud_dark or confirm_bright_ok):
                     if debug_info is not None:
                         debug_info.update(
                             {
@@ -205,6 +207,15 @@ def is_death_like(
             )
         return True
     if confirm_score >= confirm_threshold and (dark_overlay or hud_dark):
+        if debug_info is not None:
+            debug_info.update(
+                {
+                    "confirm_tpl": confirm_tpl,
+                    "confirm_score": confirm_score,
+                }
+            )
+        return True
+    if confirm_score >= confirm_threshold and confirm_bright_ok:
         if debug_info is not None:
             debug_info.update(
                 {
@@ -255,7 +266,7 @@ class MegabonkEnv(gym.Env):
         slide_key: str = "shift",
         include_cam_yaw: bool = True,
         include_cam_pitch: bool = False,
-        cam_yaw_pixels: int = 80,
+        cam_yaw_pixels: int = 160,
         cam_pitch_pixels: int = 60,
         use_arrow_cam: bool = False,
         use_heuristic_autopilot: bool = False,

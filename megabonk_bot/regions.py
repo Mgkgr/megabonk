@@ -25,10 +25,10 @@ def build_regions(width, height):
             int(0.25 * height),
         ),
         "REG_DEAD_CONFIRM": (
-            int(0.70 * width),
-            int(0.70 * height),
-            int(0.25 * width),
-            int(0.25 * height),
+            int(0.30 * width),
+            int(0.55 * height),
+            int(0.40 * width),
+            int(0.30 * height),
         ),
         "REG_UNLOCKS": (
             int(0.02 * width),
