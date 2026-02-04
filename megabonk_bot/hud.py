@@ -10,7 +10,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
     "gold": (0.85, 0.02, 0.12, 0.05),
-    "time": (0.45, 0.02, 0.10, 0.05),
+    "time": (0.41, 0.01, 0.18, 0.06),
 }
 
 

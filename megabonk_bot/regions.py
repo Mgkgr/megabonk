@@ -61,10 +61,10 @@ def build_regions(width, height):
             int(0.05 * height),
         ),
         "REG_HUD_TIME": (
-            int(0.45 * width),
-            int(0.02 * height),
-            int(0.10 * width),
-            int(0.05 * height),
+            int(0.41 * width),
+            int(0.01 * height),
+            int(0.18 * width),
+            int(0.06 * height),
         ),
         "REG_MINIMAP": (
             int(0.80 * width),
