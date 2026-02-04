@@ -81,9 +81,15 @@ SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_SHOWWINDOW = 0x0040
 GWL_EXSTYLE = -20
+GWL_STYLE = -16
 WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 LWA_COLORKEY = 0x00000001
+WS_CAPTION = 0x00C00000
+WS_THICKFRAME = 0x00040000
+WS_MINIMIZE = 0x20000000
+WS_MAXIMIZE = 0x01000000
+WS_SYSMENU = 0x00080000
 
 
 def _set_window_topmost(window_name: str, topmost: bool = True) -> bool:
@@ -144,6 +150,31 @@ def _move_window(window_name: str, x: int, y: int, w: int, h: int) -> bool:
             int(w),
             int(h),
             SWP_SHOWWINDOW,
+        )
+    )
+
+
+def _set_window_borderless(window_name: str) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU)
+    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+    return bool(
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
         )
     )
 
@@ -589,6 +620,7 @@ class MegabonkEnv(gym.Env):
                         self.debug_recognition_window, colorkey=(0, 0, 0)
                     ):
                         self._dbg_recognition_transparent_set = True
+                    _set_window_borderless(self.debug_recognition_window)
             else:
                 cv2.imshow(self.debug_recognition_window, overlay)
             cv2.waitKey(1)
