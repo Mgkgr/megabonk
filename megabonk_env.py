@@ -533,6 +533,8 @@ class MegabonkEnv(gym.Env):
         self._last_dead_r_time = 0.0
         self._dbg_death_ts = 0.0
         self._dbg_recognition_ts = 0.0
+        self._hud_cache_ts = 0.0
+        self._hud_cache_values = None
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -648,15 +650,25 @@ class MegabonkEnv(gym.Env):
                     self._dbg_recognition_topmost_set = True
 
     def _read_hud(self, frame, every_s=0.0, ts_attr="_dbg_hud_ts"):
+        now = time.time()
         if every_s > 0.0:
-            now = time.time()
             if not hasattr(self, ts_attr):
                 setattr(self, ts_attr, 0.0)
             last_ts = getattr(self, ts_attr)
             if now - last_ts < every_s:
+                if self._hud_cache_values is not None:
+                    return self._hud_cache_values
                 return None
             setattr(self, ts_attr, now)
-        return read_hud_values(frame, regions=self.regions)
+            if (
+                self._hud_cache_values is not None
+                and now - self._hud_cache_ts < every_s
+            ):
+                return self._hud_cache_values
+        values = read_hud_values(frame, regions=self.regions)
+        self._hud_cache_values = values
+        self._hud_cache_ts = now
+        return values
 
     def _should_wait_for_upgrade(self, frame, screen):
         if screen in ("CHEST_WEAPON_PICK", "CHEST_FOLIANT_PICK"):
@@ -963,7 +975,7 @@ class MegabonkEnv(gym.Env):
             frame_bgr = self._grab_frame()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
-            hud_values = self._read_hud(frame_bgr)
+            hud_values = self._read_hud(frame_bgr, every_s=self.hud_ocr_every_s)
             if is_death_like(
                 f,
                 frame_bgr=frame_bgr,

@@ -64,11 +64,11 @@ def _grid_edges(gray: np.ndarray, rows: int, cols: int) -> list[GridCell]:
     labeled = []
     for x0, y0, cw, ch, score in cells:
         if score <= low_thr:
-            label = "поверхность"
+            label = "surface"
         elif score >= high_thr:
-            label = "препятствие"
+            label = "obstacle"
         else:
-            label = "неизвестно"
+            label = "unknown"
         labeled.append(GridCell(label=label, rect=(x0, y0, cw, ch), score=score))
     return labeled
 
@@ -133,15 +133,15 @@ def _template_boxes(
 def _friendly_name(raw: str) -> str:
     lowered = raw.lower()
     if "chest" in lowered:
-        return "сундук"
+        return "chest"
     if "coin" in lowered or "gold" in lowered:
-        return "монета"
+        return "coin"
     if "foliant" in lowered or "tome" in lowered or "book" in lowered:
-        return "свиток"
+        return "tome"
     if "altar" in lowered:
-        return "алтарь"
+        return "altar"
     if "door" in lowered:
-        return "дверь"
+        return "door"
     return raw.replace("tpl_", "").replace("_", " ")
 
 
@@ -172,7 +172,7 @@ def analyze_scene(
         enemy_hsv_lower,
         enemy_hsv_upper,
         enemy_min_area,
-        label="враг",
+        label="enemy",
     )
     interactables = _template_boxes(
         frame_bgr, templates, name_hints=interact_hints, threshold=interact_threshold
