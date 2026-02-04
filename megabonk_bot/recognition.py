@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from megabonk_bot.hud import DEFAULT_HUD_REGIONS
 from megabonk_bot.vision import find_in_region
@@ -313,7 +314,12 @@ def _draw_label(
     thickness: int = 1,
     text_size: tuple[int, int] | None = None,
     baseline: int | None = None,
+    font_path: str | None = None,
 ):
+    if _has_non_ascii(text):
+        font_size = max(10, int(20 * scale))
+        _draw_label_pil(frame_bgr, origin, text, color, font_path, font_size)
+        return
     if text_size is None or baseline is None:
         (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
     else:
@@ -336,3 +342,51 @@ def _draw_label(
         thickness,
         cv2.LINE_AA,
     )
+
+
+def _draw_label_pil(
+    frame_bgr: np.ndarray,
+    origin: tuple[int, int],
+    text: str,
+    color: tuple[int, int, int],
+    font_path: str | None,
+    font_size: int,
+) -> None:
+    if frame_bgr.size == 0:
+        return
+    image = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(image)
+    font = _load_pil_font(font_path, font_size)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    pad_x = 3
+    pad_y = 2
+    tx, ty = origin
+    rect = (tx, ty, tx + text_w + pad_x * 2, ty + text_h + pad_y * 2)
+    bg_color = (color[2], color[1], color[0])
+    draw.rectangle(rect, fill=bg_color)
+    text_pos = (tx + pad_x - bbox[0], ty + pad_y - bbox[1])
+    draw.text(text_pos, text, font=font, fill=(255, 255, 255))
+    frame_bgr[:] = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+
+def _load_pil_font(font_path: str | None, font_size: int) -> ImageFont.ImageFont:
+    if font_path:
+        try:
+            return ImageFont.truetype(font_path, font_size)
+        except OSError:
+            pass
+    for candidate in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ):
+        try:
+            return ImageFont.truetype(candidate, font_size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _has_non_ascii(text: str) -> bool:
+    return any(ord(ch) > 127 for ch in text)
