@@ -482,6 +482,8 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition_window = debug_recognition_window
         self.debug_recognition_topmost = bool(debug_recognition_topmost)
         self.debug_recognition_transparent = bool(debug_recognition_transparent)
+        if self.debug_recognition_transparent:
+            self.debug_recognition_show = True
         self.hud_ocr_every_s = float(hud_ocr_every_s)
         self._dbg_recognition_topmost_set = False
         self._dbg_recognition_transparent_set = False
