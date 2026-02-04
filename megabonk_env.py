@@ -5,6 +5,7 @@ enable_dpi_awareness()
 import time  # noqa: E402
 import random  # noqa: E402
 import atexit  # noqa: E402
+from pathlib import Path  # noqa: E402
 from collections import deque  # noqa: E402
 
 import cv2  # noqa: E402
@@ -16,6 +17,7 @@ from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
 from megabonk_bot.hud import read_hud_values  # noqa: E402
+from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -331,6 +333,12 @@ class MegabonkEnv(gym.Env):
         regions_builder=build_regions,
         window_title: str | None = None,
         cap: WindowCapture | None = None,
+        debug_recognition: bool = True,
+        debug_recognition_dir: str = "dbg",
+        debug_recognition_every_s: float = 2.0,
+        recognition_grid: tuple[int, int] = (12, 20),
+        debug_recognition_show: bool = True,
+        debug_recognition_window: str = "Megabonk Recognition",
     ):
         super().__init__()
         self.cap = cap
@@ -387,6 +395,13 @@ class MegabonkEnv(gym.Env):
         if self.use_heuristic_autopilot:
             self.heuristic_pilot = HeuristicAutoPilot()
 
+        self.debug_recognition = bool(debug_recognition)
+        self.debug_recognition_dir = debug_recognition_dir
+        self.debug_recognition_every_s = float(debug_recognition_every_s)
+        self.recognition_grid = recognition_grid
+        self.debug_recognition_show = bool(debug_recognition_show)
+        self.debug_recognition_window = debug_recognition_window
+
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
             ("tap", "esc", 0.05),
@@ -402,6 +417,7 @@ class MegabonkEnv(gym.Env):
         self._sticky_left = 0
         self._last_dead_r_time = 0.0
         self._dbg_death_ts = 0.0
+        self._dbg_recognition_ts = 0.0
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -436,6 +452,27 @@ class MegabonkEnv(gym.Env):
             f"best_tpl={best_tpl} best_score={best_score:.3f} "
             f"confirm_tpl={confirm_tpl} confirm_score={confirm_score:.3f}"
         )
+
+    def _debug_recognition(self, frame):
+        if not self.debug_recognition:
+            return
+        now = time.time()
+        if now - self._dbg_recognition_ts < self.debug_recognition_every_s:
+            return
+        self._dbg_recognition_ts = now
+        rows, cols = self.recognition_grid
+        analysis = analyze_scene(
+            frame,
+            templates=self.templates,
+            grid_rows=rows,
+            grid_cols=cols,
+        )
+        overlay = draw_recognition_overlay(frame, analysis)
+        Path(self.debug_recognition_dir).mkdir(exist_ok=True)
+        cv2.imwrite(f"{self.debug_recognition_dir}/recognition_{int(now)}.png", overlay)
+        if self.debug_recognition_show:
+            cv2.imshow(self.debug_recognition_window, overlay)
+            cv2.waitKey(1)
 
     def _read_hud(self, frame, every_s=0.0):
         if every_s > 0.0:
@@ -587,6 +624,7 @@ class MegabonkEnv(gym.Env):
 
     def step(self, action):
         frame = self._grab_frame()
+        self._debug_recognition(frame)
         screen = "UNKNOWN"
         autopilot_action = None
 
