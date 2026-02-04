@@ -197,7 +197,7 @@ def draw_recognition_overlay(
             color = (40, 40, 220)
         else:
             color = (120, 120, 120)
-        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, -1)
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
         cv2.rectangle(canvas, (x, y), (x + w, y + h), (20, 20, 20), 1)
     cv2.addWeighted(overlay, grid_alpha, canvas, 1 - grid_alpha, 0, canvas)
 
@@ -235,7 +235,7 @@ def _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions):
             continue
         x, y, w, h = rect
         color = (0, 255, 255)
-        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, -1)
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
         label = f"{key}:{value}" if value is not None else f"{key}:?"
         _draw_labeled_box(canvas, rect, label, color)
 
