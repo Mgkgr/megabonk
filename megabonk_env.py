@@ -15,6 +15,7 @@ import pydirectinput as di  # noqa: E402
 from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
+from megabonk_bot.hud import read_hud_values  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -338,6 +339,16 @@ class MegabonkEnv(gym.Env):
             f"confirm_tpl={confirm_tpl} confirm_score={confirm_score:.3f}"
         )
 
+    def _read_hud(self, frame, every_s=0.0):
+        if every_s > 0.0:
+            now = time.time()
+            if not hasattr(self, "_dbg_hud_ts"):
+                self._dbg_hud_ts = 0.0
+            if now - self._dbg_hud_ts < every_s:
+                return None
+            self._dbg_hud_ts = now
+        return read_hud_values(frame, regions=self.regions)
+
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
             return
@@ -445,6 +456,9 @@ class MegabonkEnv(gym.Env):
         if self.autopilot:
             self.autopilot.debug_scores(frame)
             self._debug_death_like(frame)
+            hud_values = self._read_hud(frame, every_s=2.0)
+            if hud_values is not None:
+                self.autopilot.debug_hud(hud_values)
             screen = self.autopilot.detect_screen(frame)
             if screen == "DEAD":
                 # DEAD: всегда жмём R, Enter только при явном подтверждающем шаблоне.
@@ -466,6 +480,9 @@ class MegabonkEnv(gym.Env):
                     "r_dmg": 0.0,
                     "xp_fill": 0.0,
                     "hp_fill": 0.0,
+                    "hp": hud_values.get("hp") if hud_values else None,
+                    "gold": hud_values.get("gold") if hud_values else None,
+                    "time": hud_values.get("time") if hud_values else None,
                     "autopilot": "dead_r",
                 }
                 return obs, -1.0, True, False, info
@@ -514,6 +531,9 @@ class MegabonkEnv(gym.Env):
                     "r_dmg": 0.0,
                     "xp_fill": 0.0,
                     "hp_fill": 0.0,
+                    "hp": hud_values.get("hp") if hud_values else None,
+                    "gold": hud_values.get("gold") if hud_values else None,
+                    "time": hud_values.get("time") if hud_values else None,
                     "autopilot": autopilot_action,
                 }
                 return obs, 0.0, False, False, info
@@ -559,11 +579,13 @@ class MegabonkEnv(gym.Env):
         r_xp = 0.0
         r_dmg = 0.0
         frame_skip = random.randint(*self.frame_skip_range)
+        hud_values = None
         for _ in range(frame_skip):
             time.sleep(self.dt)
             frame_bgr = self._grab_frame()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
+            hud_values = self._read_hud(frame_bgr)
             if is_death_like(
                 f,
                 frame_bgr=frame_bgr,
@@ -593,6 +615,9 @@ class MegabonkEnv(gym.Env):
             "r_dmg": r_dmg,
             "xp_fill": 0.0,
             "hp_fill": 0.0,
+            "hp": hud_values.get("hp") if hud_values else None,
+            "gold": hud_values.get("gold") if hud_values else None,
+            "time": hud_values.get("time") if hud_values else None,
             "autopilot": autopilot_action,
         }
         return obs, float(reward), terminated, False, info
