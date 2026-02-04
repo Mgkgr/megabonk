@@ -45,7 +45,21 @@ def set_move(dir_id: int):
         (key_on if k in want else key_off)(k)
 
 def release_all_keys():
-    for k in ["w", "a", "s", "d", "left", "right", "space", "lctrl", "shift", "enter", "esc"]:
+    for k in [
+        "w",
+        "a",
+        "s",
+        "d",
+        "left",
+        "right",
+        "up",
+        "down",
+        "space",
+        "lctrl",
+        "shift",
+        "enter",
+        "esc",
+    ]:
         try:
             di.keyUp(k)
         except Exception:
@@ -218,7 +232,15 @@ def is_death_like(
 class MegabonkEnv(gym.Env):
     """
     Observations: uint8 (84, 84, 4) — стек 4 кадров (grayscale).
-    Actions: MultiDiscrete [dir(0..8), cam_yaw(0..2), jump(0/1), slide(0/1)]
+    Actions:
+        - if include_cam_yaw and include_cam_pitch:
+          MultiDiscrete [dir(0..8), cam_yaw(0..2), cam_pitch(0..2), jump(0/1), slide(0/1)]
+        - if include_cam_yaw and not include_cam_pitch:
+          MultiDiscrete [dir(0..8), cam_yaw(0..2), jump(0/1), slide(0/1)]
+        - if not include_cam_yaw and include_cam_pitch:
+          MultiDiscrete [dir(0..8), cam_pitch(0..2), jump(0/1), slide(0/1)]
+        - if neither:
+          MultiDiscrete [dir(0..8), jump(0/1), slide(0/1)]
     """
     metadata = {"render_modes": []}
 
@@ -232,7 +254,9 @@ class MegabonkEnv(gym.Env):
         jump_key: str = "space",
         slide_key: str = "shift",
         include_cam_yaw: bool = True,
+        include_cam_pitch: bool = False,
         cam_yaw_pixels: int = 80,
+        cam_pitch_pixels: int = 60,
         use_arrow_cam: bool = False,
         use_heuristic_autopilot: bool = False,
         dead_r_cooldown: float = 1.2,
@@ -263,12 +287,18 @@ class MegabonkEnv(gym.Env):
         self.jump_key = jump_key
         self.slide_key = slide_key
         self.include_cam_yaw = include_cam_yaw
+        self.include_cam_pitch = include_cam_pitch
         self.cam_yaw_pixels = int(cam_yaw_pixels)
+        self.cam_pitch_pixels = int(cam_pitch_pixels)
         self.use_arrow_cam = bool(use_arrow_cam)
         self.use_heuristic_autopilot = use_heuristic_autopilot
         self.dead_r_cooldown = float(dead_r_cooldown)
 
-        if self.include_cam_yaw:
+        if self.include_cam_yaw and self.include_cam_pitch:
+            self.action_space = spaces.MultiDiscrete([9, 3, 3, 2, 2])
+        elif self.include_cam_yaw:
+            self.action_space = spaces.MultiDiscrete([9, 3, 2, 2])
+        elif self.include_cam_pitch:
             self.action_space = spaces.MultiDiscrete([9, 3, 2, 2])
         else:
             self.action_space = spaces.MultiDiscrete([9, 2, 2])
@@ -370,6 +400,26 @@ class MegabonkEnv(gym.Env):
         dx = mapping.get(int(yaw_id), 0)
         if dx != 0:
             di.moveRel(dx, 0, duration=0)
+
+    def _apply_cam_pitch(self, pitch_id: int):
+        if not self.include_cam_pitch:
+            return
+        if self.use_arrow_cam:
+            pitch_id = int(pitch_id)
+            if pitch_id == 0:
+                di.keyDown("up")
+                di.keyUp("down")
+            elif pitch_id == 2:
+                di.keyDown("down")
+                di.keyUp("up")
+            else:
+                di.keyUp("up")
+                di.keyUp("down")
+            return
+        mapping = {0: -self.cam_pitch_pixels, 1: 0, 2: self.cam_pitch_pixels}
+        dy = mapping.get(int(pitch_id), 0)
+        if dy != 0:
+            di.moveRel(0, dy, duration=0)
 
     def _grab_frame(self):
         frame = None
@@ -554,15 +604,27 @@ class MegabonkEnv(gym.Env):
             if screen == "RUNNING":
                 self.autopilot.reset_enter_series()
 
-        if self.include_cam_yaw:
+        yaw = 1
+        pitch = 1
+        if self.include_cam_yaw and self.include_cam_pitch:
             if len(action) == 3:
                 dir_id, jump, slide = action
-                yaw = 1
+            elif len(action) == 4:
+                dir_id, yaw, jump, slide = action
+            else:
+                dir_id, yaw, pitch, jump, slide = action
+        elif self.include_cam_yaw:
+            if len(action) == 3:
+                dir_id, jump, slide = action
             else:
                 dir_id, yaw, jump, slide = action
+        elif self.include_cam_pitch:
+            if len(action) == 3:
+                dir_id, jump, slide = action
+            else:
+                dir_id, pitch, jump, slide = action
         else:
             dir_id, jump, slide = action
-            yaw = 1
 
         if self.use_heuristic_autopilot and screen == "RUNNING" and self.heuristic_pilot:
             if self.include_cam_yaw:
@@ -573,10 +635,10 @@ class MegabonkEnv(gym.Env):
                 dir_id, jump, slide, reason = self.heuristic_pilot.act(
                     frame, include_cam_yaw=False
                 )
-                yaw = 1
             autopilot_action = f"heuristic:{reason}"
 
         self._apply_cam_yaw(yaw)
+        self._apply_cam_pitch(pitch)
         if self._sticky_left <= 0:
             self._sticky_dir = int(dir_id)
             self._sticky_left = random.randint(*self.sticky_steps_range)
