@@ -236,7 +236,8 @@ def _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions):
         x, y, w, h = rect
         color = (0, 255, 255)
         cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
-        label = f"{key}:{value}" if value is not None else f"{key}:?"
+        value_label = value if value is not None else "?"
+        label = f"{key}:{value_label} ({x},{y},{w},{h})"
         _draw_labeled_box(canvas, rect, label, color)
 
 
