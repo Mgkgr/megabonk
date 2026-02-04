@@ -61,9 +61,13 @@ def _ocr_text(image, whitelist, psm=7):
     if pytesseract is None:
         return None, None
     config = f"--psm {psm} -c tessedit_char_whitelist={whitelist}"
-    data = pytesseract.image_to_data(
-        image, config=config, output_type=pytesseract.Output.DICT
-    )
+    try:
+        data = pytesseract.image_to_data(
+            image, config=config, output_type=pytesseract.Output.DICT
+        )
+    except pytesseract.TesseractNotFoundError:
+        LOGGER.warning("Tesseract OCR не найден — проверьте установку и PATH")
+        return None, None
     if not data.get("text"):
         return None, None
     best_idx = None
@@ -80,7 +84,11 @@ def _ocr_text(image, whitelist, psm=7):
             best_conf = conf
             best_idx = idx
     if best_idx is None:
-        raw = pytesseract.image_to_string(image, config=config).strip()
+        try:
+            raw = pytesseract.image_to_string(image, config=config).strip()
+        except pytesseract.TesseractNotFoundError:
+            LOGGER.warning("Tesseract OCR не найден — проверьте установку и PATH")
+            return None, None
         if not raw:
             return None, None
         return raw, 0.0
