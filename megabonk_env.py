@@ -117,6 +117,61 @@ def _hud_pixels_dark(gray84):
     return _hud_pixels_mean(gray84) < 45.0
 
 
+def _top_rainbow_like(
+    frame_bgr,
+    height_ratio=0.035,
+    sat_thr=120,
+    val_thr=120,
+    colorful_ratio_thr=0.25,
+    hue_bins=12,
+    min_bins=5,
+):
+    h, w = frame_bgr.shape[:2]
+    strip_h = max(1, int(h * height_ratio))
+    strip = frame_bgr[:strip_h, :w]
+    hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    mask = (sat > sat_thr) & (val > val_thr)
+    colorful = int(mask.sum())
+    total = mask.size
+    if total == 0:
+        return False
+    if colorful / total < colorful_ratio_thr:
+        return False
+    hue_vals = hue[mask].ravel()
+    if hue_vals.size == 0:
+        return False
+    hist, _ = np.histogram(hue_vals, bins=hue_bins, range=(0, 180))
+    min_bin_count = max(1, int(colorful * 0.05))
+    active_bins = int((hist >= min_bin_count).sum())
+    return active_bins >= min_bins
+
+
+def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
+    if frame_bgr is None or not templates or not regions:
+        return False
+    region = regions.get("REG_CHEST")
+    if not region:
+        return False
+    for name in (
+        "tpl_katana",
+        "tpl_dexec",
+        "tpl_foliant_bottom1",
+        "tpl_foliant_bottom2",
+        "tpl_foliant_bottom3",
+        "tpl_blood_tome",
+    ):
+        tpl = templates.get(name)
+        if tpl is None:
+            continue
+        found, _, _ = find_in_region(frame_bgr, tpl, region, threshold=threshold)
+        if found:
+            return True
+    return False
+
+
 def is_death_like(
     frame_gray_84,
     frame_bgr=None,
@@ -392,6 +447,13 @@ class MegabonkEnv(gym.Env):
             self._dbg_hud_ts = now
         return read_hud_values(frame, regions=self.regions)
 
+    def _should_wait_for_upgrade(self, frame, screen):
+        if screen in ("CHEST_WEAPON_PICK", "CHEST_FOLIANT_PICK"):
+            return True
+        if _is_upgrade_dialog(frame, self.templates, self.regions):
+            return True
+        return _top_rainbow_like(frame)
+
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
             return
@@ -561,6 +623,31 @@ class MegabonkEnv(gym.Env):
                     "autopilot": "dead_r",
                 }
                 return obs, -1.0, True, False, info
+            if self._should_wait_for_upgrade(frame, screen):
+                set_move(0)
+                key_off(self.jump_key)
+                key_off(self.slide_key)
+                di.keyUp("enter")
+                di.keyUp("esc")
+                self._sticky_dir = 0
+                self._sticky_left = 0
+                time.sleep(self.dt)
+                f = self._to_gray84(self._grab_frame())
+                self.frames.append(f)
+                obs = self._get_obs()
+                info = {
+                    "screen": screen,
+                    "r_alive": 0.0,
+                    "r_xp": 0.0,
+                    "r_dmg": 0.0,
+                    "xp_fill": 0.0,
+                    "hp_fill": 0.0,
+                    "hp": hud_values.get("hp") if hud_values else None,
+                    "gold": hud_values.get("gold") if hud_values else None,
+                    "time": hud_values.get("time") if hud_values else None,
+                    "autopilot": "upgrade_wait",
+                }
+                return obs, 0.0, False, False, info
             if screen in ("MAIN_MENU", "CHAR_SELECT", "UNKNOWN"):
                 set_move(0)
                 key_off(self.jump_key)
