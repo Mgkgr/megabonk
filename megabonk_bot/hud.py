@@ -32,14 +32,25 @@ def _resolve_region(frame, regions, key):
     return (int(rx * w), int(ry * h), int(rw * w), int(rh * h))
 
 
-def _preprocess_for_ocr(roi_bgr):
+def _preprocess_for_ocr(roi_bgr, *, scale=3.0, adaptive=False):
     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
-    scale = 2.0
     resized = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     blur = cv2.GaussianBlur(resized, (3, 3), 0)
-    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    if adaptive:
+        thresh = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            21,
+            2,
+        )
+    else:
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     if np.mean(thresh) < 127:
         thresh = cv2.bitwise_not(thresh)
+    kernel = np.ones((2, 2), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=1)
     return thresh
 
 
@@ -59,13 +70,36 @@ def _ocr_text(image, whitelist, psm=7):
         text = text.strip()
         if not text:
             continue
-        conf = float(data["conf"][idx])
+        try:
+            conf = float(data["conf"][idx])
+        except (TypeError, ValueError):
+            continue
         if conf > best_conf:
             best_conf = conf
             best_idx = idx
     if best_idx is None:
         return None, None
     return data["text"][best_idx].strip(), best_conf
+
+
+def _iter_preprocessed(roi_bgr):
+    for scale in (2.5, 3.0):
+        yield _preprocess_for_ocr(roi_bgr, scale=scale, adaptive=False)
+        yield _preprocess_for_ocr(roi_bgr, scale=scale, adaptive=True)
+
+
+def _best_ocr(roi_bgr, whitelist):
+    best_text = None
+    best_conf = None
+    for prep in _iter_preprocessed(roi_bgr):
+        for psm in (7, 6):
+            text, conf = _ocr_text(prep, whitelist=whitelist, psm=psm)
+            if text is None or conf is None:
+                continue
+            if best_conf is None or conf > best_conf:
+                best_conf = conf
+                best_text = text
+    return best_text, best_conf
 
 
 def _parse_int(text):
@@ -92,7 +126,7 @@ def _parse_time(text):
     return int("".join(digits))
 
 
-def read_hud_values(frame_bgr, regions=None, min_conf=55.0):
+def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
     if frame_bgr is None or frame_bgr.size == 0:
         return {"hp": None, "gold": None, "time": None}
 
@@ -102,6 +136,7 @@ def read_hud_values(frame_bgr, regions=None, min_conf=55.0):
         return {"hp": None, "gold": None, "time": None}
 
     results = {}
+    soft_conf = min_conf * 0.6
     for key, whitelist in (
         ("hp", "0123456789"),
         ("gold", "0123456789"),
@@ -112,13 +147,14 @@ def read_hud_values(frame_bgr, regions=None, min_conf=55.0):
         if roi.size == 0:
             results[key] = None
             continue
-        prep = _preprocess_for_ocr(roi)
-        text, conf = _ocr_text(prep, whitelist=whitelist, psm=7)
+        text, conf = _best_ocr(roi, whitelist=whitelist)
         if text is None or conf is None or conf < min_conf:
-            results[key] = None
-            continue
+            if text is None or conf is None or conf < soft_conf:
+                results[key] = None
+                continue
         if key == "time":
-            results[key] = _parse_time(text)
+            value = _parse_time(text)
         else:
-            results[key] = _parse_int(text)
+            value = _parse_int(text)
+        results[key] = value
     return results
