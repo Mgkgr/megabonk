@@ -7,6 +7,9 @@ import numpy as np
 
 LOGGER = logging.getLogger(__name__)
 
+_TESSERACT_MISSING = False
+_TESSERACT_WARNED = False
+
 DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
     "gold": (0.85, 0.02, 0.12, 0.05),
@@ -15,6 +18,8 @@ DEFAULT_HUD_REGIONS = {
 
 
 def _get_tesseract():
+    if _TESSERACT_MISSING:
+        return None
     if importlib.util.find_spec("pytesseract") is None:
         return None
     import pytesseract
@@ -57,6 +62,8 @@ def _preprocess_for_ocr(roi_bgr, *, scale=3.0, adaptive=False):
 
 
 def _ocr_text(image, whitelist, psm=7):
+    global _TESSERACT_MISSING
+    global _TESSERACT_WARNED
     pytesseract = _get_tesseract()
     if pytesseract is None:
         return None, None
@@ -66,7 +73,12 @@ def _ocr_text(image, whitelist, psm=7):
             image, config=config, output_type=pytesseract.Output.DICT
         )
     except pytesseract.TesseractNotFoundError:
-        LOGGER.warning("Tesseract OCR не найден — проверьте установку и PATH")
+        _TESSERACT_MISSING = True
+        if not _TESSERACT_WARNED:
+            LOGGER.warning(
+                "Tesseract OCR не найден — проверьте установку и PATH"
+            )
+            _TESSERACT_WARNED = True
         return None, None
     if not data.get("text"):
         return None, None
@@ -87,7 +99,12 @@ def _ocr_text(image, whitelist, psm=7):
         try:
             raw = pytesseract.image_to_string(image, config=config).strip()
         except pytesseract.TesseractNotFoundError:
-            LOGGER.warning("Tesseract OCR не найден — проверьте установку и PATH")
+            _TESSERACT_MISSING = True
+            if not _TESSERACT_WARNED:
+                LOGGER.warning(
+                    "Tesseract OCR не найден — проверьте установку и PATH"
+                )
+                _TESSERACT_WARNED = True
             return None, None
         if not raw:
             return None, None
