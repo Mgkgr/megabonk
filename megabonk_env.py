@@ -22,6 +22,7 @@ from megabonk_bot.recognition import (  # noqa: E402
     analyze_scene,
     draw_hud_overlay_frame,
     draw_recognition_overlay,
+    RegionOverlay,
 )
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
@@ -588,11 +589,29 @@ class MegabonkEnv(gym.Env):
             grid_rows=rows,
             grid_cols=cols,
         )
+        region_overlays = []
+        if self.regions:
+            for label, reg_key in (
+                ("MAIN_PLAY", "REG_MAIN_PLAY"),
+                ("CHAR_SELECT", "REG_CHAR_SELECT"),
+                ("CHAR_GRID", "REG_CHAR_GRID"),
+                ("CHAR_CONFIRM", "REG_CHAR_CONFIRM"),
+                ("HUD", "REG_HUD"),
+                ("MINIMAP", "REG_MINIMAP"),
+                ("DEAD", "REG_DEAD"),
+                ("DEAD_CONFIRM", "REG_DEAD_CONFIRM"),
+            ):
+                rect = self.regions.get(reg_key)
+                if rect:
+                    region_overlays.append(
+                        RegionOverlay(label=label, rect=rect)
+                    )
         overlay = draw_recognition_overlay(
             frame,
             analysis,
             hud_values=hud_values,
             hud_regions=self.regions,
+            region_overlays=region_overlays,
         )
         Path(self.debug_recognition_dir).mkdir(exist_ok=True)
         cv2.imwrite(f"{self.debug_recognition_dir}/recognition_{int(now)}.png", overlay)
