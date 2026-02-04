@@ -805,7 +805,7 @@ class MegabonkEnv(gym.Env):
                 now = time.time()
                 if now - self._last_dead_r_time >= self.dead_r_cooldown:
                     key_on("r")
-                    time.sleep(0.12)
+                    time.sleep(3.5)
                     key_off("r")
                     self._last_dead_r_time = now
                 time.sleep(0.2)
