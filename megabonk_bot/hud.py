@@ -1,6 +1,8 @@
 import importlib.util
 import logging
+import os
 import re
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -9,6 +11,7 @@ LOGGER = logging.getLogger(__name__)
 
 _TESSERACT_MISSING = False
 _TESSERACT_WARNED = False
+_TESSERACT_CONFIGURED = False
 
 DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
@@ -18,12 +21,23 @@ DEFAULT_HUD_REGIONS = {
 
 
 def _get_tesseract():
+    global _TESSERACT_CONFIGURED
     if _TESSERACT_MISSING:
         return None
     if importlib.util.find_spec("pytesseract") is None:
         return None
     import pytesseract
-
+    if not _TESSERACT_CONFIGURED:
+        cmd_from_env = os.getenv("TESSERACT_CMD")
+        if cmd_from_env:
+            pytesseract.pytesseract.tesseract_cmd = cmd_from_env
+        elif os.name == "nt":
+            default_cmd = Path(
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+            )
+            if default_cmd.exists():
+                pytesseract.pytesseract.tesseract_cmd = str(default_cmd)
+        _TESSERACT_CONFIGURED = True
     return pytesseract
 
 
