@@ -24,6 +24,13 @@ def tap(key, delay=0.05):
     time.sleep(delay)
 
 
+def is_death_like_frame(frame, mean_thr=35.0, std_thr=12.0):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    mean = float(gray.mean())
+    std = float(gray.std())
+    return mean < mean_thr and std < std_thr
+
+
 class AutoPilot:
     def __init__(self, templates, regions):
         self.t = templates
@@ -36,6 +43,10 @@ class AutoPilot:
 
     def detect_screen(self, frame):
         if self._seen(frame, "tpl_dead", "REG_DEAD", 0.55):
+            return "DEAD"
+        if self._seen(frame, "tpl_dead", "REG_DEAD", 0.35) and is_death_like_frame(frame):
+            return "DEAD"
+        if is_death_like_frame(frame) and self._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.60):
             return "DEAD"
         if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.60):
             return "CHAR_SELECT"
@@ -177,6 +188,8 @@ class AutoPilot:
         for name, tpl, reg, thr in checks:
             ok, _, sc = self._find(frame, tpl, reg, thr)
             print(f"[DBG] {name:8} ok={ok} sc={sc:.3f}")
+        death_like = is_death_like_frame(frame)
+        print(f"[DBG] DEATH_LIKE ok={death_like}")
 
     def _seen(self, frame, tpl_name, reg_name, thr):
         ok, _, _ = self._find(frame, tpl_name, reg_name, thr)
