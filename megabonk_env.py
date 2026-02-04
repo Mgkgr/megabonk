@@ -53,6 +53,7 @@ def release_all_keys():
 atexit.register(release_all_keys)
 
 DEATH_TPL_HINTS = ("dead", "game_over", "gameover", "death")
+CONFIRM_TPL_HINTS = ("confirm",)
 
 
 def _pick_death_templates(templates):
@@ -62,6 +63,15 @@ def _pick_death_templates(templates):
         name
         for name in templates
         if any(hint in name.lower() for hint in DEATH_TPL_HINTS)
+    ]
+
+def _pick_confirm_templates(templates):
+    if not templates:
+        return []
+    return [
+        name
+        for name in templates
+        if any(hint in name.lower() for hint in CONFIRM_TPL_HINTS)
     ]
 
 
@@ -76,7 +86,7 @@ def _patch_mean(gray, cx, cy, half=1):
     return float(gray[y0:y1, x0:x1].mean())
 
 
-def _hud_pixels_dark(gray84):
+def _hud_pixels_mean(gray84):
     h, w = gray84.shape[:2]
     points = [
         (int(w * 0.85), int(h * 0.06)),
@@ -85,7 +95,11 @@ def _hud_pixels_dark(gray84):
         (int(w * 0.08), int(h * 0.05)),
     ]
     values = [_patch_mean(gray84, cx, cy, half=1) for cx, cy in points]
-    return float(np.mean(values)) < 45.0
+    return float(np.mean(values))
+
+
+def _hud_pixels_dark(gray84):
+    return _hud_pixels_mean(gray84) < 45.0
 
 
 def is_death_like(
@@ -94,8 +108,11 @@ def is_death_like(
     templates=None,
     regions=None,
     death_tpl_names=None,
+    confirm_tpl_names=None,
     hard_tpl_threshold=0.62,
     soft_tpl_threshold=0.50,
+    confirm_threshold=0.62,
+    debug_info=None,
 ):
     """Грубая детекция смерти/меню.
 
@@ -104,6 +121,9 @@ def is_death_like(
     3) Дополнительно фильтруем по средней яркости/дисперсии всего кадра.
     """
     best_score = 0.0
+    best_tpl = None
+    confirm_score = 0.0
+    confirm_tpl = None
     if frame_bgr is not None and templates and regions:
         region = regions.get("REG_DEAD")
         if region:
@@ -115,17 +135,83 @@ def is_death_like(
                 found, _, score = find_in_region(
                     frame_bgr, tpl, region, threshold=hard_tpl_threshold
                 )
-                best_score = max(best_score, float(score))
+                score = float(score)
+                if score > best_score:
+                    best_score = score
+                    best_tpl = name
                 if found:
+                    if debug_info is not None:
+                        debug_info.update(
+                            {
+                                "best_tpl": name,
+                                "best_score": best_score,
+                            }
+                        )
                     return True
 
     mean = float(frame_gray_84.mean())
     std = float(frame_gray_84.std())
     dark_overlay = mean < 38.0 and std < 14.0
-    hud_dark = _hud_pixels_dark(frame_gray_84)
+    hud_mean = _hud_pixels_mean(frame_gray_84)
+    hud_dark = hud_mean < 45.0
+
+    if frame_bgr is not None and templates and regions:
+        region = regions.get("REG_DEAD_CONFIRM")
+        if region:
+            names = confirm_tpl_names or _pick_confirm_templates(templates)
+            for name in names:
+                tpl = templates.get(name)
+                if tpl is None:
+                    continue
+                found, _, score = find_in_region(
+                    frame_bgr, tpl, region, threshold=confirm_threshold
+                )
+                score = float(score)
+                if score > confirm_score:
+                    confirm_score = score
+                    confirm_tpl = name
+                if found and (dark_overlay or hud_dark):
+                    if debug_info is not None:
+                        debug_info.update(
+                            {
+                                "confirm_tpl": name,
+                                "confirm_score": confirm_score,
+                            }
+                        )
+                    return True
 
     if best_score >= soft_tpl_threshold and (dark_overlay or hud_dark):
+        if debug_info is not None:
+            debug_info.update(
+                {
+                    "best_tpl": best_tpl,
+                    "best_score": best_score,
+                }
+            )
         return True
+    if confirm_score >= confirm_threshold and (dark_overlay or hud_dark):
+        if debug_info is not None:
+            debug_info.update(
+                {
+                    "confirm_tpl": confirm_tpl,
+                    "confirm_score": confirm_score,
+                }
+            )
+        return True
+    if debug_info is not None:
+        debug_info.update(
+            {
+                "best_tpl": best_tpl,
+                "best_score": best_score,
+                "confirm_tpl": confirm_tpl,
+                "confirm_score": confirm_score,
+                "mean": mean,
+                "std": std,
+                "hud_mean": hud_mean,
+                "hud_dark": hud_dark,
+                "dark_overlay": dark_overlay,
+            }
+        )
     return dark_overlay and hud_dark
 
 class MegabonkEnv(gym.Env):
@@ -196,6 +282,7 @@ class MegabonkEnv(gym.Env):
             else {}
         )
         self._death_tpl_names = _pick_death_templates(self.templates)
+        self._confirm_tpl_names = _pick_confirm_templates(self.templates)
         if templates_dir:
             self.autopilot = AutoPilot(templates=self.templates, regions=self.regions)
         if self.use_heuristic_autopilot:
@@ -215,6 +302,41 @@ class MegabonkEnv(gym.Env):
         self._sticky_dir = 0
         self._sticky_left = 0
         self._last_dead_r_time = 0.0
+        self._dbg_death_ts = 0.0
+
+    def _debug_death_like(self, frame, every_s=2.0):
+        now = time.time()
+        if now - self._dbg_death_ts < every_s:
+            return
+        self._dbg_death_ts = now
+        gray84 = self._to_gray84(frame)
+        debug_info = {}
+        death_like = is_death_like(
+            gray84,
+            frame_bgr=frame,
+            templates=self.templates,
+            regions=self.regions,
+            death_tpl_names=self._death_tpl_names,
+            confirm_tpl_names=self._confirm_tpl_names,
+            debug_info=debug_info,
+        )
+        best_tpl = debug_info.get("best_tpl")
+        best_score = debug_info.get("best_score", 0.0)
+        confirm_tpl = debug_info.get("confirm_tpl")
+        confirm_score = debug_info.get("confirm_score", 0.0)
+        mean = debug_info.get("mean", 0.0)
+        std = debug_info.get("std", 0.0)
+        hud_mean = debug_info.get("hud_mean", 0.0)
+        hud_dark = debug_info.get("hud_dark", False)
+        dark_overlay = debug_info.get("dark_overlay", False)
+        print(
+            "[DBG] DEATH "
+            f"like={death_like} mean={mean:.1f} std={std:.1f} "
+            f"hud_mean={hud_mean:.1f} hud_dark={hud_dark} "
+            f"overlay_dark={dark_overlay} "
+            f"best_tpl={best_tpl} best_score={best_score:.3f} "
+            f"confirm_tpl={confirm_tpl} confirm_score={confirm_score:.3f}"
+        )
 
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
@@ -306,6 +428,7 @@ class MegabonkEnv(gym.Env):
                 templates=self.templates,
                 regions=self.regions,
                 death_tpl_names=self._death_tpl_names,
+                confirm_tpl_names=self._confirm_tpl_names,
             ):
                 break
             time.sleep(0.1)
@@ -321,6 +444,7 @@ class MegabonkEnv(gym.Env):
 
         if self.autopilot:
             self.autopilot.debug_scores(frame)
+            self._debug_death_like(frame)
             screen = self.autopilot.detect_screen(frame)
             if screen == "DEAD":
                 # DEAD: всегда жмём R, Enter только при явном подтверждающем шаблоне.
@@ -370,6 +494,7 @@ class MegabonkEnv(gym.Env):
                             templates=self.templates,
                             regions=self.regions,
                             death_tpl_names=self._death_tpl_names,
+                            confirm_tpl_names=self._confirm_tpl_names,
                         )
                         max_enters = 1 if dead_like else 6
                         did_enter = self.autopilot.ensure_running_fallback_enter(
@@ -445,6 +570,7 @@ class MegabonkEnv(gym.Env):
                 templates=self.templates,
                 regions=self.regions,
                 death_tpl_names=self._death_tpl_names,
+                confirm_tpl_names=self._confirm_tpl_names,
             ):
                 terminated = True
                 r_alive = -1.0
