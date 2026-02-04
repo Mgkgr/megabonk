@@ -492,7 +492,11 @@ class MegabonkEnv(gym.Env):
             return
         self._dbg_recognition_ts = now
         rows, cols = self.recognition_grid
-        hud_values = self._read_hud(frame, every_s=self.hud_ocr_every_s)
+        hud_values = self._read_hud(
+            frame,
+            every_s=self.hud_ocr_every_s,
+            ts_attr="_dbg_hud_overlay_ts",
+        )
         analysis = analyze_scene(
             frame,
             templates=self.templates,
@@ -514,14 +518,15 @@ class MegabonkEnv(gym.Env):
                 if _set_window_topmost(self.debug_recognition_window, topmost=True):
                     self._dbg_recognition_topmost_set = True
 
-    def _read_hud(self, frame, every_s=0.0):
+    def _read_hud(self, frame, every_s=0.0, ts_attr="_dbg_hud_ts"):
         if every_s > 0.0:
             now = time.time()
-            if not hasattr(self, "_dbg_hud_ts"):
-                self._dbg_hud_ts = 0.0
-            if now - self._dbg_hud_ts < every_s:
+            if not hasattr(self, ts_attr):
+                setattr(self, ts_attr, 0.0)
+            last_ts = getattr(self, ts_attr)
+            if now - last_ts < every_s:
                 return None
-            self._dbg_hud_ts = now
+            setattr(self, ts_attr, now)
         return read_hud_values(frame, regions=self.regions)
 
     def _should_wait_for_upgrade(self, frame, screen):

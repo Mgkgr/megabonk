@@ -182,6 +182,7 @@ def draw_recognition_overlay(
     analysis: dict[str, list],
     *,
     grid_alpha: float = 0.35,
+    hud_alpha: float = 0.55,
     hud_values: dict | None = None,
     hud_regions: dict | None = None,
 ) -> np.ndarray:
@@ -207,7 +208,7 @@ def draw_recognition_overlay(
     if hud_values is not None:
         hud_overlay = canvas.copy()
         _draw_hud_overlay(canvas, hud_overlay, frame_bgr, hud_values, hud_regions)
-        cv2.addWeighted(hud_overlay, grid_alpha, canvas, 1 - grid_alpha, 0, canvas)
+        cv2.addWeighted(hud_overlay, hud_alpha, canvas, 1 - hud_alpha, 0, canvas)
     return canvas
 
 
