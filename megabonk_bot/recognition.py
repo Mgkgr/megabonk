@@ -23,6 +23,13 @@ class GridCell:
     score: float
 
 
+@dataclass(frozen=True)
+class RegionOverlay:
+    label: str
+    rect: tuple[int, int, int, int]
+    color: tuple[int, int, int] = (255, 0, 255)
+
+
 def _grid_edges(gray: np.ndarray, rows: int, cols: int) -> list[GridCell]:
     h, w = gray.shape[:2]
     rows = max(1, int(rows))
@@ -185,6 +192,7 @@ def draw_recognition_overlay(
     hud_alpha: float = 0.55,
     hud_values: dict | None = None,
     hud_regions: dict | None = None,
+    region_overlays: list[RegionOverlay] | None = None,
 ) -> np.ndarray:
     canvas = frame_bgr.copy()
     overlay = frame_bgr.copy()
@@ -205,6 +213,9 @@ def draw_recognition_overlay(
         _draw_labeled_box(canvas, box.rect, box.label, (0, 0, 255))
     for box in analysis.get("interactables", []):
         _draw_labeled_box(canvas, box.rect, box.label, (255, 140, 0))
+    if region_overlays:
+        for region in region_overlays:
+            _draw_labeled_box(canvas, region.rect, region.label, region.color)
     if hud_values is not None:
         hud_overlay = canvas.copy()
         _draw_hud_overlay(canvas, hud_overlay, frame_bgr, hud_values, hud_regions)
