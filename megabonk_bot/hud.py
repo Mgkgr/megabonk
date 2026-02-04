@@ -10,10 +10,11 @@ import numpy as np
 
 LOGGER = logging.getLogger(__name__)
 
-_TESSERACT_MISSING = False
+_TESSERACT_LAST_ERROR_AT = None
 _TESSERACT_LAST_WARNED_AT = 0.0
 _TESSERACT_CONFIGURED = False
 _TESSERACT_WARNING_INTERVAL = 60.0
+_TESSERACT_RETRY_INTERVAL = 30.0
 
 DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
@@ -23,10 +24,12 @@ DEFAULT_HUD_REGIONS = {
 
 
 def _get_tesseract():
-    global _TESSERACT_CONFIGURED
-    if _TESSERACT_MISSING:
-        return None
+    global _TESSERACT_CONFIGURED, _TESSERACT_LAST_ERROR_AT
+    if _TESSERACT_LAST_ERROR_AT is not None:
+        if time.monotonic() - _TESSERACT_LAST_ERROR_AT < _TESSERACT_RETRY_INTERVAL:
+            return None
     if importlib.util.find_spec("pytesseract") is None:
+        _TESSERACT_LAST_ERROR_AT = time.monotonic()
         return None
     import pytesseract
     if not _TESSERACT_CONFIGURED:
@@ -40,6 +43,7 @@ def _get_tesseract():
             if default_cmd.exists():
                 pytesseract.pytesseract.tesseract_cmd = str(default_cmd)
         _TESSERACT_CONFIGURED = True
+    _TESSERACT_LAST_ERROR_AT = None
     return pytesseract
 
 
@@ -86,7 +90,7 @@ def _preprocess_for_ocr(roi_bgr, *, scale=3.0, adaptive=False):
 
 
 def _ocr_text(image, whitelist, psm=7):
-    global _TESSERACT_MISSING
+    global _TESSERACT_LAST_ERROR_AT
     pytesseract = _get_tesseract()
     if pytesseract is None:
         return None, None
@@ -96,7 +100,7 @@ def _ocr_text(image, whitelist, psm=7):
             image, config=config, output_type=pytesseract.Output.DICT
         )
     except pytesseract.TesseractNotFoundError:
-        _TESSERACT_MISSING = True
+        _TESSERACT_LAST_ERROR_AT = time.monotonic()
         _warn_missing_tesseract()
         return None, None
     if not data.get("text"):
@@ -118,7 +122,7 @@ def _ocr_text(image, whitelist, psm=7):
         try:
             raw = pytesseract.image_to_string(image, config=config).strip()
         except pytesseract.TesseractNotFoundError:
-            _TESSERACT_MISSING = True
+            _TESSERACT_LAST_ERROR_AT = time.monotonic()
             _warn_missing_tesseract()
             return None, None
         if not raw:
@@ -177,7 +181,7 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
 
     pytesseract = _get_tesseract()
     if pytesseract is None:
-        if _TESSERACT_MISSING:
+        if _TESSERACT_LAST_ERROR_AT is not None:
             _warn_missing_tesseract()
         else:
             LOGGER.debug("pytesseract не найден — HUD OCR отключён")
