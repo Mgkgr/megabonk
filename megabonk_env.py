@@ -497,6 +497,8 @@ class MegabonkEnv(gym.Env):
             every_s=self.hud_ocr_every_s,
             ts_attr="_dbg_hud_overlay_ts",
         )
+        if hud_values is None:
+            hud_values = {"hp": None, "gold": None, "time": None}
         analysis = analyze_scene(
             frame,
             templates=self.templates,
