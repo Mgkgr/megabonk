@@ -132,22 +132,26 @@ def _ocr_text(image, whitelist, psm=7):
 
 
 def _iter_preprocessed(roi_bgr):
-    for scale in (2.5, 3.0, 3.5, 4.0):
+    """Итерирует ограниченный набор препроцесс‑вариантов для OCR (4 варианта)."""
+    for scale in (3.0, 3.5):
         yield _preprocess_for_ocr(roi_bgr, scale=scale, adaptive=False)
         yield _preprocess_for_ocr(roi_bgr, scale=scale, adaptive=True)
 
 
-def _best_ocr(roi_bgr, whitelist):
+def _best_ocr(roi_bgr, whitelist, *, psm=7, target_conf=70.0):
     best_text = None
     best_conf = None
     for prep in _iter_preprocessed(roi_bgr):
-        for psm in (7, 6):
-            text, conf = _ocr_text(prep, whitelist=whitelist, psm=psm)
-            if text is None or conf is None:
-                continue
-            if best_conf is None or conf > best_conf:
-                best_conf = conf
-                best_text = text
+        text, conf = _ocr_text(prep, whitelist=whitelist, psm=psm)
+        if text is None or conf is None:
+            continue
+        if best_conf is None or conf > best_conf:
+            best_conf = conf
+            best_text = text
+            if best_conf >= target_conf:
+                break
+        if best_conf is not None and best_conf >= target_conf:
+            break
     return best_text, best_conf
 
 
@@ -176,6 +180,11 @@ def _parse_time(text):
 
 
 def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
+    """Читает HUD значения.
+
+    Параметры OCR фиксированы по типу ROI: PSM 7 для одно‑строчных чисел/таймера,
+    чтобы не удваивать количество вызовов Tesseract.
+    """
     if frame_bgr is None or frame_bgr.size == 0:
         return {"hp": None, "gold": None, "time": None}
 
@@ -198,7 +207,7 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
         if roi.size == 0:
             results[key] = None
             continue
-        text, conf = _best_ocr(roi, whitelist=whitelist)
+        text, conf = _best_ocr(roi, whitelist=whitelist, psm=7)
         if key == "time":
             value = _parse_time(text) if text else None
             if value is not None:
