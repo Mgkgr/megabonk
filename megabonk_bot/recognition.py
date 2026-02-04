@@ -207,6 +207,8 @@ def draw_recognition_overlay(
             color = (120, 120, 120)
         cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
         cv2.rectangle(canvas, (x, y), (x + w, y + h), (20, 20, 20), 1)
+        if w >= 40 and h >= 30:
+            _draw_label(canvas, (x, y), cell.label, color)
     cv2.addWeighted(overlay, grid_alpha, canvas, 1 - grid_alpha, 0, canvas)
 
     for box in analysis.get("enemies", []):
@@ -279,6 +281,36 @@ def _draw_labeled_box(
     (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
     tx = x
     ty = max(0, y - th - baseline - 4)
+    _draw_label(
+        frame_bgr,
+        (tx, ty),
+        text,
+        color,
+        font=font,
+        scale=scale,
+        thickness=thickness,
+        text_size=(tw, th),
+        baseline=baseline,
+    )
+
+
+def _draw_label(
+    frame_bgr: np.ndarray,
+    origin: tuple[int, int],
+    text: str,
+    color: tuple[int, int, int],
+    *,
+    font=cv2.FONT_HERSHEY_SIMPLEX,
+    scale: float = 0.5,
+    thickness: int = 1,
+    text_size: tuple[int, int] | None = None,
+    baseline: int | None = None,
+):
+    if text_size is None or baseline is None:
+        (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    else:
+        tw, th = text_size
+    tx, ty = origin
     cv2.rectangle(
         frame_bgr,
         (tx, ty),
