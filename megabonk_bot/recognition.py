@@ -199,9 +199,9 @@ def draw_recognition_overlay(
     grid = analysis.get("grid", [])
     for cell in grid:
         x, y, w, h = cell.rect
-        if cell.label == "поверхность":
+        if cell.label == "surface":
             color = (60, 200, 60)
-        elif cell.label == "препятствие":
+        elif cell.label == "obstacle":
             color = (40, 40, 220)
         else:
             color = (120, 120, 120)
