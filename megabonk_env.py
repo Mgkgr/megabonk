@@ -365,7 +365,7 @@ class MegabonkEnv(gym.Env):
         debug_recognition_dir: str = "dbg",
         debug_recognition_every_s: float = 2.0,
         recognition_grid: tuple[int, int] = (12, 20),
-        debug_recognition_show: bool = True,
+        debug_recognition_show: bool = False,
         debug_recognition_window: str = "Megabonk Recognition",
         debug_recognition_topmost: bool = True,
         hud_ocr_every_s: float = 0.5,
@@ -492,13 +492,19 @@ class MegabonkEnv(gym.Env):
             return
         self._dbg_recognition_ts = now
         rows, cols = self.recognition_grid
+        hud_values = self._read_hud(frame, every_s=self.hud_ocr_every_s)
         analysis = analyze_scene(
             frame,
             templates=self.templates,
             grid_rows=rows,
             grid_cols=cols,
         )
-        overlay = draw_recognition_overlay(frame, analysis)
+        overlay = draw_recognition_overlay(
+            frame,
+            analysis,
+            hud_values=hud_values,
+            hud_regions=self.regions,
+        )
         Path(self.debug_recognition_dir).mkdir(exist_ok=True)
         cv2.imwrite(f"{self.debug_recognition_dir}/recognition_{int(now)}.png", overlay)
         if self.debug_recognition_show:

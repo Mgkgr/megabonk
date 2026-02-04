@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from megabonk_bot.hud import DEFAULT_HUD_REGIONS
 from megabonk_bot.vision import find_in_region
 
 
@@ -181,6 +182,8 @@ def draw_recognition_overlay(
     analysis: dict[str, list],
     *,
     grid_alpha: float = 0.35,
+    hud_values: dict | None = None,
+    hud_regions: dict | None = None,
 ) -> np.ndarray:
     canvas = frame_bgr.copy()
     overlay = frame_bgr.copy()
@@ -201,7 +204,35 @@ def draw_recognition_overlay(
         _draw_labeled_box(canvas, box.rect, box.label, (0, 0, 255))
     for box in analysis.get("interactables", []):
         _draw_labeled_box(canvas, box.rect, box.label, (255, 140, 0))
+    if hud_values is not None:
+        hud_overlay = canvas.copy()
+        _draw_hud_overlay(canvas, hud_overlay, frame_bgr, hud_values, hud_regions)
+        cv2.addWeighted(hud_overlay, grid_alpha, canvas, 1 - grid_alpha, 0, canvas)
     return canvas
+
+
+def _draw_hud_overlay(canvas, overlay, frame_bgr, hud_values, hud_regions):
+    for key, value in hud_values.items():
+        rect = _resolve_hud_region(frame_bgr, hud_regions, key)
+        if rect is None:
+            continue
+        x, y, w, h = rect
+        color = (0, 255, 255)
+        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, -1)
+        label = f"{key}:{value}" if value is not None else f"{key}:?"
+        _draw_labeled_box(canvas, rect, label, color)
+
+
+def _resolve_hud_region(frame_bgr, regions, key):
+    if regions:
+        reg_key = f"REG_HUD_{key.upper()}"
+        if reg_key in regions:
+            return regions[reg_key]
+    if key not in DEFAULT_HUD_REGIONS:
+        return None
+    h, w = frame_bgr.shape[:2]
+    rx, ry, rw, rh = DEFAULT_HUD_REGIONS[key]
+    return (int(rx * w), int(ry * h), int(rw * w), int(rh * h))
 
 
 def _draw_labeled_box(
