@@ -44,7 +44,7 @@ def set_move(dir_id: int):
         (key_on if k in want else key_off)(k)
 
 def release_all_keys():
-    for k in ["w", "a", "s", "d", "space", "lctrl", "shift", "enter", "esc"]:
+    for k in ["w", "a", "s", "d", "left", "right", "space", "lctrl", "shift", "enter", "esc"]:
         try:
             di.keyUp(k)
         except Exception:
@@ -232,6 +232,7 @@ class MegabonkEnv(gym.Env):
         slide_key: str = "shift",
         include_cam_yaw: bool = True,
         cam_yaw_pixels: int = 80,
+        use_arrow_cam: bool = False,
         use_heuristic_autopilot: bool = False,
         dead_r_cooldown: float = 1.2,
         reset_sequence=None,
@@ -262,6 +263,7 @@ class MegabonkEnv(gym.Env):
         self.slide_key = slide_key
         self.include_cam_yaw = include_cam_yaw
         self.cam_yaw_pixels = int(cam_yaw_pixels)
+        self.use_arrow_cam = bool(use_arrow_cam)
         self.use_heuristic_autopilot = use_heuristic_autopilot
         self.dead_r_cooldown = float(dead_r_cooldown)
 
@@ -340,6 +342,18 @@ class MegabonkEnv(gym.Env):
 
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
+            return
+        if self.use_arrow_cam:
+            yaw_id = int(yaw_id)
+            if yaw_id == 0:
+                di.keyDown("left")
+                di.keyUp("right")
+            elif yaw_id == 2:
+                di.keyDown("right")
+                di.keyUp("left")
+            else:
+                di.keyUp("left")
+                di.keyUp("right")
             return
         mapping = {0: -self.cam_yaw_pixels, 1: 0, 2: self.cam_yaw_pixels}
         dx = mapping.get(int(yaw_id), 0)
