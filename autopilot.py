@@ -76,9 +76,6 @@ class AutoPilot:
         self.t = templates
         self.r = regions
         self.missing_templates = [tpl for tpl in REQUIRED_TEMPLATES if tpl not in templates]
-        self.enter_budget = 0
-        self.enter_last_ts = 0.0
-        self.enter_cooldown = 0.35
         self.click_last_ts = 0.0
         self.click_cooldown = 0.5
 
@@ -108,37 +105,6 @@ class AutoPilot:
         if self._seen(frame, "tpl_minimap", "REG_MINIMAP", 0.55):
             return "RUNNING"
         return "UNKNOWN"
-
-    def tap_enter(self):
-        di.keyDown("enter")
-        time.sleep(0.01)
-        di.keyUp("enter")
-
-    def ensure_running_fallback_enter(
-        self, max_enters=6, screen=None, frame=None, death_like=False
-    ):
-        if screen is None and frame is not None:
-            screen = self.detect_screen(frame)
-        if screen == "DEAD" or death_like:
-            self.reset_enter_series()
-            return False
-        if screen == "CHAR_SELECT":
-            self.reset_enter_series()
-            return False
-        now = time.time()
-        if self.enter_budget == 0 and self.enter_last_ts == 0.0:
-            self.enter_budget = max_enters
-
-        if self.enter_budget > 0 and (now - self.enter_last_ts) >= self.enter_cooldown:
-            self.tap_enter()
-            self.enter_last_ts = now
-            self.enter_budget -= 1
-            return True
-        return False
-
-    def reset_enter_series(self):
-        self.enter_budget = 0
-        self.enter_last_ts = 0.0
 
     def safe_click_if_found(self, found, pos, score, thr):
         if not found or score < thr:
