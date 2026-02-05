@@ -850,11 +850,13 @@ class MegabonkEnv(gym.Env):
 
         self._last_obs = obs
         self._sticky_left = max(0, self._sticky_left - 1)
+        hud_values = read_hud_values(frame, regions=self.regions)
         info = {
             "screen": screen,
             "r_alive": r_alive,
             "r_xp": r_xp,
             "r_dmg": r_dmg,
             "autopilot": autopilot_action,
+            "time": hud_values.get("time"),
         }
         return obs, float(reward), terminated, False, info
