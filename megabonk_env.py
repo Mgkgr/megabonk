@@ -6,6 +6,7 @@ import ctypes  # noqa: E402
 import time  # noqa: E402
 import random  # noqa: E402
 import atexit  # noqa: E402
+from pathlib import Path  # noqa: E402
 from collections import deque  # noqa: E402
 
 import cv2  # noqa: E402
@@ -16,7 +17,7 @@ import pydirectinput as di  # noqa: E402
 from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
-from megabonk_bot.recognition import analyze_scene  # noqa: E402
+from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -32,6 +33,12 @@ def key_off(key: str): di.keyUp(key)
 def tap(key: str, dt=0.01):
     di.keyDown(key)
     time.sleep(dt)
+    di.keyUp(key)
+
+
+def hold(key: str, dt=0.5):
+    di.keyDown(key)
+    time.sleep(max(0.0, float(dt)))
     di.keyUp(key)
 
 def set_move(dir_id: int):
@@ -422,7 +429,7 @@ class MegabonkEnv(gym.Env):
         jump_key: str = "space",
         slide_key: str = "shift",
         include_cam_yaw: bool = True,
-        include_cam_pitch: bool = False,
+        include_cam_pitch: bool = True,
         cam_yaw_pixels: int = 160,
         cam_pitch_pixels: int = 60,
         use_arrow_cam: bool = False,
@@ -500,13 +507,17 @@ class MegabonkEnv(gym.Env):
             self.heuristic_pilot = HeuristicAutoPilot()
 
         self.debug_recognition = bool(debug_recognition)
+        self.debug_recognition_dir = Path(debug_recognition_dir)
         self.debug_recognition_every_s = float(debug_recognition_every_s)
         self.recognition_grid = recognition_grid
+        self._dbg_recognition_idx = 0
+        if self.debug_recognition:
+            self.debug_recognition_dir.mkdir(parents=True, exist_ok=True)
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
-            ("tap", "r", 0.05),
-            ("sleep", None, 0.6),
+            ("hold", "r", 3.5),
+            ("sleep", None, 0.4),
         ]
 
         self._last_obs = None
@@ -656,8 +667,19 @@ class MegabonkEnv(gym.Env):
             if kind == "tap":
                 tap(key, dt=0.01)
                 time.sleep(t)
+            elif kind == "hold":
+                hold(key, dt=t)
             elif kind == "sleep":
                 time.sleep(t)
+
+    def _dump_recognition_debug(self, frame, analysis):
+        overlay = draw_recognition_overlay(frame, analysis)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        self._dbg_recognition_idx += 1
+        filename = f"rec_{ts}_{self._dbg_recognition_idx:06d}.png"
+        out_path = self.debug_recognition_dir / filename
+        cv2.imwrite(str(out_path), overlay)
+        return out_path
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -712,7 +734,8 @@ class MegabonkEnv(gym.Env):
                 )
                 surfaces = sum(1 for cell in analysis.get("grid", []) if cell.label == "surface")
                 enemies = len(analysis.get("enemies", []))
-                print(f"[DBG] scene surfaces={surfaces} enemies={enemies}")
+                dbg_path = self._dump_recognition_debug(frame, analysis)
+                print(f"[DBG] scene surfaces={surfaces} enemies={enemies} shot={dbg_path}")
         yaw = 1
         pitch = 1
         if self.include_cam_yaw and self.include_cam_pitch:
@@ -779,6 +802,10 @@ class MegabonkEnv(gym.Env):
             ):
                 terminated = True
                 r_alive = -1.0
+                now = time.time()
+                if now - self._last_dead_r_time >= self.dead_r_cooldown:
+                    hold("r", dt=3.5)
+                    self._last_dead_r_time = now
                 break
             r_alive += 0.01
 
