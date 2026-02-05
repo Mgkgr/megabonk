@@ -281,6 +281,30 @@ def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
     return False
 
 
+
+
+def _top_left_time_cells_black(
+    gray84,
+    rows=12,
+    cols=20,
+    cells=2,
+    black_thr=10.0,
+    dark_ratio_thr=0.98,
+):
+    h, w = gray84.shape[:2]
+    cell_h = max(1, h // max(1, int(rows)))
+    cell_w = max(1, w // max(1, int(cols)))
+    for idx in range(max(1, int(cells))):
+        x0 = idx * cell_w
+        x1 = w if idx == cells - 1 else min(w, x0 + cell_w)
+        patch = gray84[0:cell_h, x0:x1]
+        if patch.size == 0:
+            return False
+        patch_mean = float(patch.mean())
+        dark_ratio = float((patch <= black_thr).mean())
+        if patch_mean > black_thr or dark_ratio < dark_ratio_thr:
+            return False
+    return True
 def is_death_like(
     frame_gray_84,
     frame_bgr=None,
@@ -334,6 +358,7 @@ def is_death_like(
     dark_overlay = mean < 38.0 and std < 14.0
     hud_mean = _hud_pixels_mean(frame_gray_84)
     hud_dark = hud_mean < 45.0
+    time_cells_black = _top_left_time_cells_black(frame_gray_84)
     confirm_bright_ok = mean < confirm_mean_threshold
 
     if frame_bgr is not None and templates and regions:
@@ -360,6 +385,11 @@ def is_death_like(
                             }
                         )
                     return True
+
+    if time_cells_black:
+        if debug_info is not None:
+            debug_info.update({"time_cells_black": True})
+        return True
 
     if best_score >= soft_tpl_threshold and (dark_overlay or hud_dark):
         if debug_info is not None:
@@ -400,9 +430,10 @@ def is_death_like(
                 "hud_mean": hud_mean,
                 "hud_dark": hud_dark,
                 "dark_overlay": dark_overlay,
+                "time_cells_black": time_cells_black,
             }
         )
-    return dark_overlay and hud_dark
+    return (dark_overlay and hud_dark) or time_cells_black
 
 class MegabonkEnv(gym.Env):
     """
@@ -553,11 +584,12 @@ class MegabonkEnv(gym.Env):
         hud_mean = debug_info.get("hud_mean", 0.0)
         hud_dark = debug_info.get("hud_dark", False)
         dark_overlay = debug_info.get("dark_overlay", False)
+        time_cells_black = debug_info.get("time_cells_black", False)
         print(
             "[DBG] DEATH "
             f"like={death_like} mean={mean:.1f} std={std:.1f} "
             f"hud_mean={hud_mean:.1f} hud_dark={hud_dark} "
-            f"overlay_dark={dark_overlay} "
+            f"overlay_dark={dark_overlay} time_cells_black={time_cells_black} "
             f"best_tpl={best_tpl} best_score={best_score:.3f} "
             f"confirm_tpl={confirm_tpl} confirm_score={confirm_score:.3f}"
         )
