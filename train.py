@@ -30,7 +30,7 @@ class PrintCallback(BaseCallback):
                     f"[{self.n_calls}] screen={i.get('screen')} "
                     f"xp={i.get('xp_fill'):.3f} hp={i.get('hp_fill'):.3f} "
                     f"r=({i.get('r_alive'):.3f},{i.get('r_xp'):.3f},{i.get('r_dmg'):.3f}) "
-                    f"auto={i.get('autopilot')}"
+                    f"auto={i.get('autopilot')} recognized_time={i.get('time')}"
                 )
         return True
 
