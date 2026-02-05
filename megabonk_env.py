@@ -6,7 +6,6 @@ import ctypes  # noqa: E402
 import time  # noqa: E402
 import random  # noqa: E402
 import atexit  # noqa: E402
-from pathlib import Path  # noqa: E402
 from collections import deque  # noqa: E402
 
 import cv2  # noqa: E402
@@ -17,13 +16,7 @@ import pydirectinput as di  # noqa: E402
 from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
-from megabonk_bot.hud import read_hud_values  # noqa: E402
-from megabonk_bot.recognition import (  # noqa: E402
-    analyze_scene,
-    draw_hud_overlay_frame,
-    draw_recognition_overlay,
-    RegionOverlay,
-)
+from megabonk_bot.recognition import analyze_scene  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -507,18 +500,8 @@ class MegabonkEnv(gym.Env):
             self.heuristic_pilot = HeuristicAutoPilot()
 
         self.debug_recognition = bool(debug_recognition)
-        self.debug_recognition_dir = debug_recognition_dir
         self.debug_recognition_every_s = float(debug_recognition_every_s)
         self.recognition_grid = recognition_grid
-        self.debug_recognition_show = bool(debug_recognition_show)
-        self.debug_recognition_window = debug_recognition_window
-        self.debug_recognition_topmost = bool(debug_recognition_topmost)
-        self.debug_recognition_transparent = bool(debug_recognition_transparent)
-        if self.debug_recognition_transparent:
-            self.debug_recognition_show = True
-        self.hud_ocr_every_s = float(hud_ocr_every_s)
-        self._dbg_recognition_topmost_set = False
-        self._dbg_recognition_transparent_set = False
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
@@ -533,8 +516,6 @@ class MegabonkEnv(gym.Env):
         self._last_dead_r_time = 0.0
         self._dbg_death_ts = 0.0
         self._dbg_recognition_ts = 0.0
-        self._hud_cache_ts = 0.0
-        self._hud_cache_values = None
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -569,113 +550,6 @@ class MegabonkEnv(gym.Env):
             f"best_tpl={best_tpl} best_score={best_score:.3f} "
             f"confirm_tpl={confirm_tpl} confirm_score={confirm_score:.3f}"
         )
-
-    def _debug_recognition(self, frame):
-        if not self.debug_recognition:
-            return
-        now = time.time()
-        if now - self._dbg_recognition_ts < self.debug_recognition_every_s:
-            return
-        self._dbg_recognition_ts = now
-        rows, cols = self.recognition_grid
-        hud_values = self._read_hud(
-            frame,
-            every_s=self.hud_ocr_every_s,
-            ts_attr="_dbg_hud_overlay_ts",
-        )
-        if hud_values is None:
-            hud_values = {"hp": None, "gold": None, "time": None}
-        analysis = analyze_scene(
-            frame,
-            templates=self.templates,
-            grid_rows=rows,
-            grid_cols=cols,
-        )
-        region_overlays = []
-        if self.regions:
-            for label, reg_key in (
-                ("MAIN_PLAY", "REG_MAIN_PLAY"),
-                ("CHAR_SELECT", "REG_CHAR_SELECT"),
-                ("CHAR_GRID", "REG_CHAR_GRID"),
-                ("CHAR_CONFIRM", "REG_CHAR_CONFIRM"),
-                ("HUD", "REG_HUD"),
-                ("MINIMAP", "REG_MINIMAP"),
-                ("DEAD", "REG_DEAD"),
-                ("DEAD_CONFIRM", "REG_DEAD_CONFIRM"),
-            ):
-                rect = self.regions.get(reg_key)
-                if rect:
-                    region_overlays.append(
-                        RegionOverlay(label=label, rect=rect)
-                    )
-        overlay = draw_recognition_overlay(
-            frame,
-            analysis,
-            hud_values=hud_values,
-            hud_regions=self.regions,
-            region_overlays=region_overlays,
-        )
-        Path(self.debug_recognition_dir).mkdir(exist_ok=True)
-        cv2.imwrite(f"{self.debug_recognition_dir}/recognition_{int(now)}.png", overlay)
-        if self.debug_recognition_show:
-            if self.debug_recognition_transparent:
-                hud_only = draw_hud_overlay_frame(
-                    frame,
-                    hud_values=hud_values,
-                    hud_regions=self.regions,
-                )
-                cv2.imshow(self.debug_recognition_window, hud_only)
-                if (
-                    self.cap is not None
-                    and _move_window(
-                        self.debug_recognition_window,
-                        self.region["left"],
-                        self.region["top"],
-                        self.region["width"],
-                        self.region["height"],
-                    )
-                ):
-                    pass
-                if not self._dbg_recognition_transparent_set:
-                    if _set_window_transparent(
-                        self.debug_recognition_window, colorkey=(0, 0, 0)
-                    ):
-                        self._dbg_recognition_transparent_set = True
-                    _set_window_borderless(self.debug_recognition_window)
-            else:
-                cv2.imshow(self.debug_recognition_window, overlay)
-            cv2.waitKey(1)
-            if self.debug_recognition_topmost and not self._dbg_recognition_topmost_set:
-                if _set_window_topmost(self.debug_recognition_window, topmost=True):
-                    self._dbg_recognition_topmost_set = True
-
-    def _read_hud(self, frame, every_s=0.0, ts_attr="_dbg_hud_ts"):
-        now = time.time()
-        if every_s > 0.0:
-            if not hasattr(self, ts_attr):
-                setattr(self, ts_attr, 0.0)
-            last_ts = getattr(self, ts_attr)
-            if now - last_ts < every_s:
-                if self._hud_cache_values is not None:
-                    return self._hud_cache_values
-                return None
-            setattr(self, ts_attr, now)
-            if (
-                self._hud_cache_values is not None
-                and now - self._hud_cache_ts < every_s
-            ):
-                return self._hud_cache_values
-        values = read_hud_values(frame, regions=self.regions)
-        self._hud_cache_values = values
-        self._hud_cache_ts = now
-        return values
-
-    def _should_wait_for_upgrade(self, frame, screen):
-        if screen in ("CHEST_WEAPON_PICK", "CHEST_FOLIANT_PICK"):
-            return True
-        if _is_upgrade_dialog(frame, self.templates, self.regions):
-            return True
-        return _top_rainbow_like(frame)
 
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
@@ -820,104 +694,25 @@ class MegabonkEnv(gym.Env):
 
     def step(self, action):
         frame = self._grab_frame()
-        self._debug_recognition(frame)
         screen = "UNKNOWN"
         autopilot_action = None
 
-        if self.autopilot:
-            self.autopilot.debug_scores(frame)
-            self._debug_death_like(frame)
-            hud_values = self._read_hud(frame, every_s=self.hud_ocr_every_s)
-            if hud_values is not None:
-                self.autopilot.debug_hud(hud_values)
-            screen = self.autopilot.detect_screen(frame)
-            if screen == "DEAD":
-                # DEAD: всегда жмём R, Enter только при явном подтверждающем шаблоне.
-                now = time.time()
-                if now - self._last_dead_r_time >= self.dead_r_cooldown:
-                    key_on("r")
-                    time.sleep(3.5)
-                    key_off("r")
-                    self._last_dead_r_time = now
-                time.sleep(0.2)
-                f = self._to_gray84(self._grab_frame())
-                self.frames.append(f)
-                obs = self._get_obs()
-                info = {
-                    "screen": screen,
-                    "r_alive": -1.0,
-                    "r_xp": 0.0,
-                    "r_dmg": 0.0,
-                    "xp_fill": 0.0,
-                    "hp_fill": 0.0,
-                    "hp": hud_values.get("hp") if hud_values else None,
-                    "gold": hud_values.get("gold") if hud_values else None,
-                    "time": hud_values.get("time") if hud_values else None,
-                    "autopilot": "dead_r",
-                }
-                return obs, -1.0, True, False, info
-            if self._should_wait_for_upgrade(frame, screen):
-                set_move(0)
-                key_off(self.jump_key)
-                key_off(self.slide_key)
-                self._sticky_dir = 0
-                self._sticky_left = 0
-                time.sleep(self.dt)
-                f = self._to_gray84(self._grab_frame())
-                self.frames.append(f)
-                obs = self._get_obs()
-                info = {
-                    "screen": screen,
-                    "r_alive": 0.0,
-                    "r_xp": 0.0,
-                    "r_dmg": 0.0,
-                    "xp_fill": 0.0,
-                    "hp_fill": 0.0,
-                    "hp": hud_values.get("hp") if hud_values else None,
-                    "gold": hud_values.get("gold") if hud_values else None,
-                    "time": hud_values.get("time") if hud_values else None,
-                    "autopilot": "upgrade_wait",
-                }
-                return obs, 0.0, False, False, info
-            if screen in ("MAIN_MENU", "CHAR_SELECT", "UNKNOWN"):
-                set_move(0)
-                key_off(self.jump_key)
-                key_off(self.slide_key)
-                self._sticky_dir = 0
-                self._sticky_left = 0
-                if screen == "CHAR_SELECT":
-                    acted = self.autopilot.pick_fox_and_confirm(frame)
-                    autopilot_action = "pick_fox" if acted else "char_wait"
-                else:
-                    acted = self.autopilot.ensure_running(frame)
-                    if acted:
-                        autopilot_action = "menu_click"
-                    else:
-                        if screen == "UNKNOWN":
-                            autopilot_action = "menu_wait_unknown"
-                        else:
-                            autopilot_action = "menu_wait"
-                        time.sleep(self.dt)
-                time.sleep(self.dt)
-                f = self._to_gray84(self._grab_frame())
-                self.frames.append(f)
-                obs = self._get_obs()
-                info = {
-                    "screen": screen,
-                    "r_alive": 0.0,
-                    "r_xp": 0.0,
-                    "r_dmg": 0.0,
-                    "xp_fill": 0.0,
-                    "hp_fill": 0.0,
-                    "hp": hud_values.get("hp") if hud_values else None,
-                    "gold": hud_values.get("gold") if hud_values else None,
-                    "time": hud_values.get("time") if hud_values else None,
-                    "autopilot": autopilot_action,
-                }
-                return obs, 0.0, False, False, info
-            if screen == "RUNNING":
-                pass
-
+        # Упрощённый режим: оставляем только распознавание поверхностей/врагов в логах,
+        # отключаем логику HUD/апгрейдов/меню и любые HUD-оверлеи.
+        if self.debug_recognition:
+            now = time.time()
+            if now - self._dbg_recognition_ts >= self.debug_recognition_every_s:
+                self._dbg_recognition_ts = now
+                rows, cols = self.recognition_grid
+                analysis = analyze_scene(
+                    frame,
+                    templates=self.templates,
+                    grid_rows=rows,
+                    grid_cols=cols,
+                )
+                surfaces = sum(1 for cell in analysis.get("grid", []) if cell.label == "surface")
+                enemies = len(analysis.get("enemies", []))
+                print(f"[DBG] scene surfaces={surfaces} enemies={enemies}")
         yaw = 1
         pitch = 1
         if self.include_cam_yaw and self.include_cam_pitch:
@@ -969,13 +764,11 @@ class MegabonkEnv(gym.Env):
         r_xp = 0.0
         r_dmg = 0.0
         frame_skip = random.randint(*self.frame_skip_range)
-        hud_values = None
         for _ in range(frame_skip):
             time.sleep(self.dt)
             frame_bgr = self._grab_frame()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
-            hud_values = self._read_hud(frame_bgr, every_s=self.hud_ocr_every_s)
             if is_death_like(
                 f,
                 frame_bgr=frame_bgr,
@@ -1003,11 +796,6 @@ class MegabonkEnv(gym.Env):
             "r_alive": r_alive,
             "r_xp": r_xp,
             "r_dmg": r_dmg,
-            "xp_fill": 0.0,
-            "hp_fill": 0.0,
-            "hp": hud_values.get("hp") if hud_values else None,
-            "gold": hud_values.get("gold") if hud_values else None,
-            "time": hud_values.get("time") if hud_values else None,
             "autopilot": autopilot_action,
         }
         return obs, float(reward), terminated, False, info
