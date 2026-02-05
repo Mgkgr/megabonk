@@ -18,6 +18,7 @@ from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
 from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
+from megabonk_bot.hud import read_hud_values  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -540,6 +541,7 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition = bool(debug_recognition)
         self.debug_recognition_dir = Path(debug_recognition_dir)
         self.debug_recognition_every_s = float(debug_recognition_every_s)
+        self.hud_ocr_every_s = float(hud_ocr_every_s)
         self.recognition_grid = recognition_grid
         self._dbg_recognition_idx = 0
         if self.debug_recognition:
@@ -558,6 +560,7 @@ class MegabonkEnv(gym.Env):
         self._last_dead_r_time = 0.0
         self._dbg_death_ts = 0.0
         self._dbg_recognition_ts = 0.0
+        self._dbg_hud_ts = 0.0
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -731,14 +734,7 @@ class MegabonkEnv(gym.Env):
             frame = self._grab_frame()
             f = self._to_gray84(frame)
             self.frames.append(f)
-            if not is_death_like(
-                f,
-                frame_bgr=frame,
-                templates=self.templates,
-                regions=self.regions,
-                death_tpl_names=self._death_tpl_names,
-                confirm_tpl_names=self._confirm_tpl_names,
-            ):
+            if not _top_left_time_cells_black(f):
                 break
             time.sleep(0.1)
 
@@ -767,7 +763,18 @@ class MegabonkEnv(gym.Env):
                 surfaces = sum(1 for cell in analysis.get("grid", []) if cell.label == "surface")
                 enemies = len(analysis.get("enemies", []))
                 dbg_path = self._dump_recognition_debug(frame, analysis)
-                print(f"[DBG] scene surfaces={surfaces} enemies={enemies} shot={dbg_path}")
+                time_val = None
+                if now - self._dbg_hud_ts >= self.hud_ocr_every_s:
+                    self._dbg_hud_ts = now
+                    hud_values = read_hud_values(frame, regions=self.regions)
+                    time_val = hud_values.get("time")
+                if time_val is not None:
+                    print(
+                        f"[DBG] scene surfaces={surfaces} enemies={enemies} "
+                        f"time={time_val} shot={dbg_path}"
+                    )
+                else:
+                    print(f"[DBG] scene surfaces={surfaces} enemies={enemies} shot={dbg_path}")
         yaw = 1
         pitch = 1
         if self.include_cam_yaw and self.include_cam_pitch:
@@ -824,14 +831,7 @@ class MegabonkEnv(gym.Env):
             frame_bgr = self._grab_frame()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
-            if is_death_like(
-                f,
-                frame_bgr=frame_bgr,
-                templates=self.templates,
-                regions=self.regions,
-                death_tpl_names=self._death_tpl_names,
-                confirm_tpl_names=self._confirm_tpl_names,
-            ):
+            if _top_left_time_cells_black(f):
                 terminated = True
                 r_alive = -1.0
                 now = time.time()
