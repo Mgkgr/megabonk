@@ -755,6 +755,7 @@ class MegabonkEnv(gym.Env):
         frame = self._grab_frame()
         screen = "UNKNOWN"
         autopilot_action = None
+        death_like_now = False
 
         # Упрощённый режим: оставляем только распознавание поверхностей/врагов в логах,
         # отключаем логику HUD/апгрейдов/меню и любые HUD-оверлеи.
@@ -807,7 +808,19 @@ class MegabonkEnv(gym.Env):
         else:
             dir_id, jump, slide = action
 
-        if self.use_heuristic_autopilot and screen == "RUNNING" and self.heuristic_pilot:
+        if self.use_heuristic_autopilot and self.heuristic_pilot:
+            gray84 = self._to_gray84(frame)
+            death_like_now = is_death_like(
+                gray84,
+                frame_bgr=frame,
+                templates=self.templates,
+                regions=self.regions,
+                death_tpl_names=self._death_tpl_names,
+                confirm_tpl_names=self._confirm_tpl_names,
+            )
+            screen = "DEAD" if death_like_now else "RUNNING"
+
+        if self.use_heuristic_autopilot and self.heuristic_pilot and not death_like_now:
             if self.include_cam_yaw:
                 dir_id, yaw, jump, slide, reason = self.heuristic_pilot.act(
                     frame, include_cam_yaw=True
