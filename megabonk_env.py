@@ -506,6 +506,16 @@ class MegabonkEnv(gym.Env):
         debug_recognition_transparent: bool = True,
         hud_ocr_every_s: float = 1.5,
         death_check_every: int = 8,
+        reward_danger_k: float = 0.15,
+        reward_stuck_k: float = 0.08,
+        reward_loot_k: float = 0.12,
+        reward_enemy_roi: tuple[float, float, float, float] = (0.35, 0.55, 0.30, 0.35),
+        reward_loot_roi: tuple[float, float, float, float] = (0.35, 0.38, 0.30, 0.36),
+        reward_enemy_hsv_lower: tuple[int, int, int] = (45, 80, 40),
+        reward_enemy_hsv_upper: tuple[int, int, int] = (85, 255, 255),
+        reward_coin_hsv_lower: tuple[int, int, int] = (18, 120, 80),
+        reward_coin_hsv_upper: tuple[int, int, int] = (35, 255, 255),
+        reward_stuck_diff_threshold: float = 3.0,
     ):
         super().__init__()
         self.cap = cap
@@ -593,6 +603,18 @@ class MegabonkEnv(gym.Env):
         self._dbg_recognition_ts = 0.0
         self._dbg_hud_ts = 0.0
         self._last_hud_values: dict[str, str] = {}
+        self.reward_danger_k = float(reward_danger_k)
+        self.reward_stuck_k = float(reward_stuck_k)
+        self.reward_loot_k = float(reward_loot_k)
+        self.reward_enemy_roi = reward_enemy_roi
+        self.reward_loot_roi = reward_loot_roi
+        self.reward_enemy_hsv_lower = np.array(reward_enemy_hsv_lower, dtype=np.uint8)
+        self.reward_enemy_hsv_upper = np.array(reward_enemy_hsv_upper, dtype=np.uint8)
+        self.reward_coin_hsv_lower = np.array(reward_coin_hsv_lower, dtype=np.uint8)
+        self.reward_coin_hsv_upper = np.array(reward_coin_hsv_upper, dtype=np.uint8)
+        self.reward_stuck_diff_threshold = float(reward_stuck_diff_threshold)
+        self._last_reward_gray = None
+        self._last_reward_forward = False
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -687,6 +709,53 @@ class MegabonkEnv(gym.Env):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, (84, 84), interpolation=cv2.INTER_AREA)
         return gray.astype(np.uint8)
+
+    def _find_center_area_in_roi(self, frame, lower, upper, roi_rel):
+        h, w = frame.shape[:2]
+        x0 = int(roi_rel[0] * w)
+        y0 = int(roi_rel[1] * h)
+        rw = int(roi_rel[2] * w)
+        rh = int(roi_rel[3] * h)
+        x1 = min(w, x0 + rw)
+        y1 = min(h, y0 + rh)
+        if x1 <= x0 or y1 <= y0:
+            return None, 0.0, 0.0
+        roi = frame[y0:y1, x0:x1]
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, lower, upper)
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = contours[0] if len(contours) == 2 else contours[1]
+        area = 0.0
+        center = None
+        if contours:
+            contour = max(contours, key=cv2.contourArea)
+            area = float(cv2.contourArea(contour))
+            if area > 0.0:
+                moments = cv2.moments(contour)
+                if moments["m00"] != 0:
+                    cx = int(moments["m10"] / moments["m00"]) + x0
+                    cy = int(moments["m01"] / moments["m00"]) + y0
+                    center = (cx, cy)
+        roi_area = float((x1 - x0) * (y1 - y0))
+        area_frac = area / roi_area if roi_area > 0 else 0.0
+        return center, area, area_frac
+
+    def _is_reward_stuck(self, frame, forwardish):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if self._last_reward_gray is None:
+            self._last_reward_gray = gray
+            self._last_reward_forward = forwardish
+            return False
+        diff = cv2.absdiff(gray, self._last_reward_gray)
+        self._last_reward_gray = gray
+        was_forward = self._last_reward_forward
+        self._last_reward_forward = forwardish
+        if not was_forward:
+            return False
+        return float(diff.mean()) < self.reward_stuck_diff_threshold
 
     def _get_obs(self):
         # гарантируем ровно frame_stack кадров всегда
@@ -848,6 +917,9 @@ class MegabonkEnv(gym.Env):
         r_alive = 0.0
         r_xp = 0.0
         r_dmg = 0.0
+        r_danger = 0.0
+        r_stuck = 0.0
+        r_loot = 0.0
         frame_skip = random.randint(*self.frame_skip_range)
         for _ in range(frame_skip):
             time.sleep(self.dt)
@@ -886,8 +958,28 @@ class MegabonkEnv(gym.Env):
                 return obs, float(reward), terminated, False, info
             r_alive += 0.01
 
+        forwardish = dir_id in (1, 5, 6)
+        danger_center, danger_area, danger_frac = self._find_center_area_in_roi(
+            frame,
+            self.reward_enemy_hsv_lower,
+            self.reward_enemy_hsv_upper,
+            self.reward_enemy_roi,
+        )
+        loot_center, loot_area, loot_frac = self._find_center_area_in_roi(
+            frame,
+            self.reward_coin_hsv_lower,
+            self.reward_coin_hsv_upper,
+            self.reward_loot_roi,
+        )
+        if danger_center is not None and danger_area > 0:
+            r_danger = -self.reward_danger_k * danger_frac
+        if loot_center is not None and loot_area > 0:
+            r_loot = self.reward_loot_k * loot_frac
+        if self._is_reward_stuck(frame, forwardish):
+            r_stuck = -self.reward_stuck_k
+
         obs = self._get_obs()
-        reward = r_alive + r_xp + r_dmg
+        reward = r_alive + r_xp + r_dmg + r_danger + r_stuck + r_loot
 
         # --- опционально: “прогресс” по HUD ---
         # Например, мерить среднюю яркость в ROI полоски XP/HP (нужно найти координаты на 84x84).
@@ -900,6 +992,9 @@ class MegabonkEnv(gym.Env):
             "r_alive": r_alive,
             "r_xp": r_xp,
             "r_dmg": r_dmg,
+            "r_danger": r_danger,
+            "r_stuck": r_stuck,
+            "r_loot": r_loot,
             "autopilot": autopilot_action,
             "time": self._last_hud_values.get("time"),
         }
