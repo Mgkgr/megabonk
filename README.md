@@ -102,6 +102,52 @@ python play.py
 | Управление камерой | `moveRel` или стрелки | В игре может не работать `moveRel` в некоторых режимах | Добавить флаг `use_arrow_cam=True` для проверки, а лучше — авто fallback | Позже: непрерывный yaw/pitch, не 3‑позиционный |
 | Debug‑распознавание | Дамп PNG, логи раз в N секунд | Создаёт ощущение «видит раз в несколько секунд», может тормозить | На обучение — выключить полностью | Отдельный режим debug‑run с горячей клавишей |
 
+## Две схемы, чтобы не путаться
+
+### Минимальная архитектура MVP (что должно остаться включенным)
+
+```
+MegabonkEnv.step()
+  ├─ grab_frame()  -> frame BGR
+  ├─ gray84 = resize(frame)
+  ├─ if death_detect(gray84, frame):
+  │      release_all_keys()
+  │      hold("r", 3.5)
+  │      return terminated=True
+  ├─ else:
+  │      action = PPO_action
+  │      if safety_layer_enabled:
+  │           action = override_if_danger_or_stuck(frame, action)
+  │      apply_action(action)
+  │      reward = alive + shaping(danger, stuck, loot)
+  │      return terminated=False
+  └─ reset(): hold("r") + wait_for_RUNNING(minimap/lvl)
+```
+
+### “Safety layer” (чтобы PPO учился, но не умирал мгновенно)
+
+```
+PPO proposes action A
+   |
+   v
+Heuristic checks:
+  - danger ahead?
+  - stuck?
+If YES -> output safe action A'
+If NO  -> keep A
+```
+
+Это даёт лучший компромисс: обучение стартует, эпизоды становятся длиннее, но агент всё ещё влияет на поведение.
+
+## Короткий чек‑лист «прямо сейчас», чтобы продвинуться
+
+1. Отключите OCR таймера из hot‑path (не используйте `read_hud_values()` на каждом шаге до стабилизации). OCR требует установленного Tesseract и правильного пути/языков.
+2. Сделайте смерть надёжной: быстрый тёмный‑экран + фолбэк `is_death_like()` (с `tpl_dead`/`tpl_confirm`) вместо «только тайм‑клетки».
+3. На смерти перед `hold("r")` делайте `release_all_keys()` — иначе легко получить залипания и «не перезапускается».
+4. Принудительно применяйте `HeuristicAutoPilot` при RUNNING, и временно считайте RUNNING = «не смерть».
+5. Уберите дебаг‑дампы PNG и редкие логи из обучающего запуска, иначе всё будет казаться «раз в несколько секунд» и реально тормозить.
+6. Проверьте DPI awareness — у вас 125% scaling; Per‑Monitor‑V2 (`-4`) соответствует `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`.
+
 ## Текущие ограничения
 
 - Проект рассчитан на Windows и управление активным окном игры (без headless/серверного режима).
