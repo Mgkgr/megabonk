@@ -496,7 +496,7 @@ class MegabonkEnv(gym.Env):
         regions_builder=build_regions,
         window_title: str | None = None,
         cap: WindowCapture | None = None,
-        debug_recognition: bool = True,
+        debug_recognition: bool = False,
         debug_recognition_dir: str = "dbg",
         debug_recognition_every_s: float = 2.0,
         recognition_grid: tuple[int, int] = (12, 20),
@@ -504,7 +504,7 @@ class MegabonkEnv(gym.Env):
         debug_recognition_window: str = "Megabonk Recognition",
         debug_recognition_topmost: bool = True,
         debug_recognition_transparent: bool = True,
-        hud_ocr_every_s: float = 0.5,
+        hud_ocr_every_s: float = 1.5,
         death_check_every: int = 8,
     ):
         super().__init__()
@@ -773,8 +773,8 @@ class MegabonkEnv(gym.Env):
                 surfaces = sum(1 for cell in analysis.get("grid", []) if cell.label == "surface")
                 enemies = len(analysis.get("enemies", []))
                 dbg_path = self._dump_recognition_debug(frame, analysis)
-                time_val = None
-                if now - self._dbg_hud_ts >= self.hud_ocr_every_s:
+                time_val = self._last_hud_values.get("time") if self._last_hud_values else None
+                if self.hud_ocr_every_s > 0 and now - self._dbg_hud_ts >= self.hud_ocr_every_s:
                     self._dbg_hud_ts = now
                     hud_values = read_hud_values(frame, regions=self.regions)
                     self._last_hud_values = hud_values
