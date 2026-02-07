@@ -76,6 +76,7 @@ atexit.register(release_all_keys)
 
 DEATH_TPL_HINTS = ("dead", "game_over", "gameover", "death")
 CONFIRM_TPL_HINTS = ("confirm",)
+RUNNING_TPL_HINTS = ("minimap", "lvl", "level")
 
 HWND_TOPMOST = -1
 HWND_NOTOPMOST = -2
@@ -197,6 +198,16 @@ def _pick_confirm_templates(templates):
         name
         for name in templates
         if any(hint in name.lower() for hint in CONFIRM_TPL_HINTS)
+    ]
+
+
+def _pick_running_templates(templates):
+    if not templates:
+        return []
+    return [
+        name
+        for name in templates
+        if any(hint in name.lower() for hint in RUNNING_TPL_HINTS)
     ]
 
 
@@ -494,6 +505,7 @@ class MegabonkEnv(gym.Env):
         debug_recognition_topmost: bool = True,
         debug_recognition_transparent: bool = True,
         hud_ocr_every_s: float = 0.5,
+        death_check_every: int = 8,
     ):
         super().__init__()
         self.cap = cap
@@ -546,6 +558,7 @@ class MegabonkEnv(gym.Env):
         )
         self._death_tpl_names = _pick_death_templates(self.templates)
         self._confirm_tpl_names = _pick_confirm_templates(self.templates)
+        self._running_tpl_names = _pick_running_templates(self.templates)
         if templates_dir:
             self.autopilot = AutoPilot(templates=self.templates, regions=self.regions)
         if self.use_heuristic_autopilot:
@@ -571,6 +584,8 @@ class MegabonkEnv(gym.Env):
         self._sticky_dir = 0
         self._sticky_left = 0
         self._last_dead_r_time = 0.0
+        self._death_check_every = max(1, int(death_check_every))
+        self._death_check_idx = 0
         self._dbg_death_ts = 0.0
         self._dbg_recognition_ts = 0.0
         self._dbg_hud_ts = 0.0
@@ -736,6 +751,7 @@ class MegabonkEnv(gym.Env):
         self._do_reset_sequence()
         self._sticky_dir = 0
         self._sticky_left = 0
+        self._death_check_idx = 0
 
         # ждём, пока не будет “похоже на игру”
         self.frames.clear()
@@ -744,11 +760,11 @@ class MegabonkEnv(gym.Env):
         self.frames.append(f)
         obs = self._get_obs()
         t0 = time.time()
-        while time.time() - t0 < 6.0:
+        while time.time() - t0 < 8.0:
             frame = self._grab_frame()
             f = self._to_gray84(frame)
             self.frames.append(f)
-            if not _top_left_time_cells_black(f):
+            if self._is_running_frame(frame, f):
                 break
             time.sleep(0.1)
 
@@ -846,7 +862,10 @@ class MegabonkEnv(gym.Env):
             frame_bgr = self._grab_frame()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
-            if _fast_death_check(f) and is_death_like(
+            self._death_check_idx += 1
+            death_suspect = _fast_death_check(f)
+            forced_check = self._death_check_idx % self._death_check_every == 0
+            if (death_suspect or forced_check) and is_death_like(
                 f,
                 frame_bgr=frame_bgr,
                 templates=self.templates,
@@ -856,12 +875,23 @@ class MegabonkEnv(gym.Env):
             ):
                 terminated = True
                 r_alive = -1.0
-                now = time.time()
-                if now - self._last_dead_r_time >= self.dead_r_cooldown:
-                    self._release_inputs_for_restart()
-                    hold("r", dt=3.5)
-                    self._last_dead_r_time = now
-                break
+                release_all_keys()
+                self._release_inputs_for_restart()
+                hold("r", dt=3.5)
+                self._last_dead_r_time = time.time()
+                obs = self._get_obs()
+                reward = r_alive + r_xp + r_dmg
+                self._last_obs = obs
+                self._sticky_left = max(0, self._sticky_left - 1)
+                info = {
+                    "screen": screen,
+                    "r_alive": r_alive,
+                    "r_xp": r_xp,
+                    "r_dmg": r_dmg,
+                    "autopilot": autopilot_action,
+                    "time": self._last_hud_values.get("time"),
+                }
+                return obs, float(reward), terminated, False, info
             r_alive += 0.01
 
         obs = self._get_obs()
@@ -889,3 +919,23 @@ class MegabonkEnv(gym.Env):
         key_off(self.slide_key)
         key_off("space")
         key_off("shift")
+
+    def _is_running_frame(self, frame_bgr, gray84):
+        if frame_bgr is not None and self.templates and self.regions and self._running_tpl_names:
+            for name in self._running_tpl_names:
+                tpl = self.templates.get(name)
+                if tpl is None:
+                    continue
+                region = self.regions.get("REG_MINIMAP")
+                if "lvl" in name or "level" in name:
+                    region = self.regions.get("REG_HUD")
+                if not region:
+                    continue
+                found, _, _ = find_in_region(frame_bgr, tpl, region, threshold=0.55)
+                if found:
+                    return True
+        if gray84 is None:
+            return False
+        time_cells_black = _top_left_time_cells_black(gray84)
+        hud_dark = _hud_pixels_dark(gray84)
+        return (not time_cells_black) and (not hud_dark)
