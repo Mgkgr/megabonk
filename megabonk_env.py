@@ -520,6 +520,9 @@ class MegabonkEnv(gym.Env):
         self.cam_yaw_pixels = int(cam_yaw_pixels)
         self.cam_pitch_pixels = int(cam_pitch_pixels)
         self.use_arrow_cam = bool(use_arrow_cam)
+        if self.use_arrow_cam:
+            print("[WARN] use_arrow_cam=True больше не поддерживается, используется движение мышью.")
+            self.use_arrow_cam = False
         self.use_heuristic_autopilot = use_heuristic_autopilot
         self.dead_r_cooldown = float(dead_r_cooldown)
 
@@ -614,18 +617,6 @@ class MegabonkEnv(gym.Env):
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
             return
-        if self.use_arrow_cam:
-            yaw_id = int(yaw_id)
-            if yaw_id == 0:
-                di.keyDown("left")
-                di.keyUp("right")
-            elif yaw_id == 2:
-                di.keyDown("right")
-                di.keyUp("left")
-            else:
-                di.keyUp("left")
-                di.keyUp("right")
-            return
         mapping = {0: -self.cam_yaw_pixels, 1: 0, 2: self.cam_yaw_pixels}
         dx = mapping.get(int(yaw_id), 0)
         if dx != 0:
@@ -633,18 +624,6 @@ class MegabonkEnv(gym.Env):
 
     def _apply_cam_pitch(self, pitch_id: int):
         if not self.include_cam_pitch:
-            return
-        if self.use_arrow_cam:
-            pitch_id = int(pitch_id)
-            if pitch_id == 0:
-                di.keyDown("up")
-                di.keyUp("down")
-            elif pitch_id == 2:
-                di.keyDown("down")
-                di.keyUp("up")
-            else:
-                di.keyUp("up")
-                di.keyUp("down")
             return
         mapping = {0: -self.cam_pitch_pixels, 1: 0, 2: self.cam_pitch_pixels}
         dy = mapping.get(int(pitch_id), 0)
