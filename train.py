@@ -21,6 +21,12 @@ class PrintCallback(BaseCallback):
         super().__init__()
         self.every = every
 
+    @staticmethod
+    def _fmt(value) -> str:
+        if isinstance(value, (int, float)):
+            return f"{value:.3f}"
+        return "n/a"
+
     def _on_step(self) -> bool:
         if self.n_calls % self.every == 0:
             infos = self.locals.get("infos")
@@ -28,8 +34,8 @@ class PrintCallback(BaseCallback):
                 i = infos[0]
                 print(
                     f"[{self.n_calls}] screen={i.get('screen')} "
-                    f"xp={i.get('xp_fill'):.3f} hp={i.get('hp_fill'):.3f} "
-                    f"r=({i.get('r_alive'):.3f},{i.get('r_xp'):.3f},{i.get('r_dmg'):.3f}) "
+                    f"xp={self._fmt(i.get('xp_fill'))} hp={self._fmt(i.get('hp_fill'))} "
+                    f"r=({self._fmt(i.get('r_alive'))},{self._fmt(i.get('r_xp'))},{self._fmt(i.get('r_dmg'))}) "
                     f"auto={i.get('autopilot')} recognized_time={i.get('time')}"
                 )
         return True
