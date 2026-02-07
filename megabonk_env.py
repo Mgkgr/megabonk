@@ -487,6 +487,8 @@ class MegabonkEnv(gym.Env):
         cap: WindowCapture | None = None,
         debug_recognition: bool = True,
         debug_recognition_dir: str = "dbg",
+        # Периодический debug-дaмп: меньше смысла делать чаще, иначе PNG/анализ кадра
+        # будет съедать CPU/GPU. Для обучения лучше отключать дампы, чтобы избежать "лагов".
         debug_recognition_every_s: float = 2.0,
         recognition_grid: tuple[int, int] = (12, 20),
         debug_recognition_show: bool = False,
