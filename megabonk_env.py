@@ -574,6 +574,7 @@ class MegabonkEnv(gym.Env):
         self._dbg_death_ts = 0.0
         self._dbg_recognition_ts = 0.0
         self._dbg_hud_ts = 0.0
+        self._last_hud_values: dict[str, str] = {}
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -780,6 +781,7 @@ class MegabonkEnv(gym.Env):
                 if now - self._dbg_hud_ts >= self.hud_ocr_every_s:
                     self._dbg_hud_ts = now
                     hud_values = read_hud_values(frame, regions=self.regions)
+                    self._last_hud_values = hud_values
                     time_val = hud_values.get("time")
                 if time_val is not None:
                     print(
@@ -871,14 +873,13 @@ class MegabonkEnv(gym.Env):
 
         self._last_obs = obs
         self._sticky_left = max(0, self._sticky_left - 1)
-        hud_values = read_hud_values(frame, regions=self.regions)
         info = {
             "screen": screen,
             "r_alive": r_alive,
             "r_xp": r_xp,
             "r_dmg": r_dmg,
             "autopilot": autopilot_action,
-            "time": hud_values.get("time"),
+            "time": self._last_hud_values.get("time"),
         }
         return obs, float(reward), terminated, False, info
 
