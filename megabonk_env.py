@@ -306,6 +306,19 @@ def _top_left_time_cells_black(
         if patch_mean > black_thr or dark_ratio < dark_ratio_thr:
             return False
     return True
+
+
+def _fast_death_check(gray84, mean_thr=44.0, std_thr=18.0):
+    if _top_left_time_cells_black(
+        gray84,
+        black_thr=18.0,
+        dark_ratio_thr=0.90,
+    ):
+        return True
+    mean = float(gray84.mean())
+    std = float(gray84.std())
+    return mean < mean_thr and std < std_thr
+
 def is_death_like(
     frame_gray_84,
     frame_bgr=None,
@@ -831,11 +844,19 @@ class MegabonkEnv(gym.Env):
             frame_bgr = self._grab_frame()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
-            if _top_left_time_cells_black(f):
+            if _fast_death_check(f) and is_death_like(
+                f,
+                frame_bgr=frame_bgr,
+                templates=self.templates,
+                regions=self.regions,
+                death_tpl_names=self._death_tpl_names,
+                confirm_tpl_names=self._confirm_tpl_names,
+            ):
                 terminated = True
                 r_alive = -1.0
                 now = time.time()
                 if now - self._last_dead_r_time >= self.dead_r_cooldown:
+                    self._release_inputs_for_restart()
                     hold("r", dt=3.5)
                     self._last_dead_r_time = now
                 break
@@ -860,3 +881,10 @@ class MegabonkEnv(gym.Env):
             "time": hud_values.get("time"),
         }
         return obs, float(reward), terminated, False, info
+
+    def _release_inputs_for_restart(self):
+        set_move(0)
+        key_off(self.jump_key)
+        key_off(self.slide_key)
+        key_off("space")
+        key_off("shift")
