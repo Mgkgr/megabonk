@@ -67,6 +67,7 @@ def release_all_keys():
         "space",
         "lctrl",
         "shift",
+        "tab",
     ]:
         try:
             di.keyUp(k)
@@ -320,13 +321,7 @@ def _top_left_time_cells_black(
     return True
 
 
-def _fast_death_check(gray84, mean_thr=44.0, std_thr=18.0):
-    if _top_left_time_cells_black(
-        gray84,
-        black_thr=18.0,
-        dark_ratio_thr=0.90,
-    ):
-        return True
+def _fast_death_check(gray84, mean_thr=35.0, std_thr=12.0):
     mean = float(gray84.mean())
     std = float(gray84.std())
     return mean < mean_thr and std < std_thr
@@ -491,7 +486,11 @@ class MegabonkEnv(gym.Env):
         cam_pitch_pixels: int = 60,
         use_arrow_cam: bool = False,
         use_heuristic_autopilot: bool = False,
-        dead_r_cooldown: float = 1.2,
+        dead_r_cooldown: float = 3.5,
+        restart_cooldown_s: float | None = None,
+        restart_hold_s: float = 3.5,
+        restart_wait_timeout_s: float = 8.0,
+        death_hysteresis_frames: int = 3,
         reset_sequence=None,
         templates_dir: str | None = "templates",
         regions_builder=build_regions,
@@ -547,7 +546,13 @@ class MegabonkEnv(gym.Env):
             print("[WARN] use_arrow_cam=True больше не поддерживается, используется движение мышью.")
             self.use_arrow_cam = False
         self.use_heuristic_autopilot = use_heuristic_autopilot
-        self.dead_r_cooldown = float(dead_r_cooldown)
+        if restart_cooldown_s is None:
+            self.restart_cooldown_s = float(dead_r_cooldown)
+        else:
+            self.restart_cooldown_s = float(restart_cooldown_s)
+        self.restart_hold_s = float(restart_hold_s)
+        self.restart_wait_timeout_s = float(restart_wait_timeout_s)
+        self.death_hysteresis_frames = max(1, int(death_hysteresis_frames))
 
         if self.include_cam_yaw and self.include_cam_pitch:
             self.action_space = spaces.MultiDiscrete([9, 3, 3, 2, 2])
@@ -911,6 +916,7 @@ class MegabonkEnv(gym.Env):
         self._sticky_dir = 0
         self._sticky_left = 0
         self._death_check_idx = 0
+        self._death_like_streak = 0
 
         # ждём, пока не будет “похоже на игру”
         self.frames.clear()
@@ -994,14 +1000,16 @@ class MegabonkEnv(gym.Env):
         if self.use_heuristic_autopilot and self.heuristic_pilot:
             death_start = time.perf_counter()
             gray84 = self._to_gray84(frame)
-            death_like_now = is_death_like(
-                gray84,
-                frame_bgr=frame,
-                templates=self.templates,
-                regions=self.regions,
-                death_tpl_names=self._death_tpl_names,
-                confirm_tpl_names=self._confirm_tpl_names,
-            )
+            death_suspect = _fast_death_check(gray84)
+            if death_suspect:
+                death_like_now = is_death_like(
+                    gray84,
+                    frame_bgr=frame,
+                    templates=self.templates,
+                    regions=self.regions,
+                    death_tpl_names=self._death_tpl_names,
+                    confirm_tpl_names=self._confirm_tpl_names,
+                )
             self._prof_add("death", time.perf_counter() - death_start)
             screen = "DEAD" if death_like_now else "RUNNING"
 
@@ -1055,15 +1063,16 @@ class MegabonkEnv(gym.Env):
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
             self._death_check_idx += 1
-            death_suspect = _fast_death_check(f)
-            forced_check = self._death_check_idx % self._death_check_every == 0
+            now_loop = time.time()
+            cooldown_active = (now_loop - self._last_dead_r_time) < self.restart_cooldown_s
+            death_suspect = False if cooldown_active else _fast_death_check(f)
             death_like = False
             debug_info = {}
             hard_tpl_threshold = 0.62
             soft_tpl_threshold = 0.50
             confirm_threshold = 0.48
             confirm_mean_threshold = 95.0
-            if death_suspect or forced_check:
+            if death_suspect:
                 death_like = is_death_like(
                     f,
                     frame_bgr=frame_bgr,
@@ -1082,7 +1091,7 @@ class MegabonkEnv(gym.Env):
             else:
                 self._death_like_streak = 0
             self._prof_add("death", time.perf_counter() - death_start)
-            if death_like:
+            if death_like and self._death_like_streak >= self.death_hysteresis_frames:
                 self._log_event(
                     "DEATH_DETECTED",
                     best_score=debug_info.get("best_score", 0.0),
@@ -1092,7 +1101,7 @@ class MegabonkEnv(gym.Env):
                     dark_overlay=debug_info.get("dark_overlay", False),
                     death_suspect=death_suspect,
                     death_streak=self._death_like_streak,
-                    forced_check=forced_check,
+                    forced_check=False,
                     hud_dark=debug_info.get("hud_dark", False),
                     hud_mean=debug_info.get("hud_mean", 0.0),
                     mean=debug_info.get("mean", 0.0),
@@ -1105,20 +1114,10 @@ class MegabonkEnv(gym.Env):
                 )
                 terminated = True
                 r_alive = -1.0
-                release_all_keys()
-                self._release_inputs_for_restart()
-                self._log_event(
-                    "RESTART_START",
-                    reason="death_like",
+                self._restart_after_death(
                     death_streak=self._death_like_streak,
-                )
-                hold("r", dt=3.5)
-                self._log_event(
-                    "RESTART_DONE",
                     reason="death_like",
-                    death_streak=self._death_like_streak,
                 )
-                self._last_dead_r_time = time.time()
                 obs = self._get_obs()
                 reward = r_alive + r_xp + r_dmg
                 self._last_obs = obs
@@ -1184,6 +1183,50 @@ class MegabonkEnv(gym.Env):
         key_off(self.slide_key)
         key_off("space")
         key_off("shift")
+        release_all_keys()
+
+    def _wait_for_running(self, timeout_s: float) -> bool:
+        t0 = time.time()
+        while time.time() - t0 < timeout_s:
+            frame = self._grab_frame()
+            gray = self._to_gray84(frame)
+            if self._is_running_frame(frame, gray):
+                return True
+            time.sleep(0.1)
+        return False
+
+    def _restart_after_death(self, *, death_streak: int, reason: str):
+        now = time.time()
+        if now - self._last_dead_r_time < self.restart_cooldown_s:
+            self._log_event(
+                "RESTART_SKIPPED_COOLDOWN",
+                reason=reason,
+                death_streak=death_streak,
+                cooldown_s=self.restart_cooldown_s,
+            )
+            return
+        self._release_inputs_for_restart()
+        self._log_event(
+            "RESTART_START",
+            reason=reason,
+            death_streak=death_streak,
+        )
+        hold("r", dt=self.restart_hold_s)
+        self._last_dead_r_time = time.time()
+        if not self._wait_for_running(self.restart_wait_timeout_s):
+            self._log_event(
+                "RESTART_TIMEOUT",
+                reason=reason,
+                death_streak=death_streak,
+            )
+            hold("r", dt=self.restart_hold_s)
+            self._last_dead_r_time = time.time()
+            self._wait_for_running(self.restart_wait_timeout_s)
+        self._log_event(
+            "RESTART_DONE",
+            reason=reason,
+            death_streak=death_streak,
+        )
 
     def _is_running_frame(self, frame_bgr, gray84):
         if frame_bgr is not None and self.templates and self.regions and self._running_tpl_names:
