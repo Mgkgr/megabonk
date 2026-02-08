@@ -36,18 +36,37 @@ class PrintCallback(BaseCallback):
                     f"[{self.n_calls}] screen={i.get('screen')} "
                     f"xp={self._fmt(i.get('xp_fill'))} hp={self._fmt(i.get('hp_fill'))} "
                     f"r=({self._fmt(i.get('r_alive'))},{self._fmt(i.get('r_xp'))},{self._fmt(i.get('r_dmg'))}) "
-                    f"auto={i.get('autopilot')} recognized_time={i.get('time')}"
+                    f"auto={i.get('autopilot')} safety={i.get('safety_override')} "
+                    f"safety_strength={self._fmt(i.get('safety_strength'))} "
+                    f"recognized_time={i.get('time')}"
                 )
         return True
 
 def make_env():
-    env = MegabonkEnv(window_title=WINDOW, step_hz=12, templates_dir="templates", regions_builder=build_regions)
+    env = MegabonkEnv(
+        window_title=WINDOW,
+        step_hz=12,
+        templates_dir="templates",
+        regions_builder=build_regions,
+        safety_enabled=True,
+        safety_strength=1.0,
+        safety_anneal_steps=200_000,
+        safety_min_strength=0.0,
+        safety_danger_frac_threshold=0.02,
+        safety_stuck_enabled=True,
+    )
     return Monitor(env)
 
 env = DummyVecEnv([make_env])
 # SB3 ожидает (C,H,W), а у нас (H,W,C) — транспонируем
 env = VecTransposeImage(env)
-device = "cuda" if torch.cuda.is_available() else "cpu"
+torch.backends.cudnn.benchmark = True
+if not torch.cuda.is_available():
+    raise RuntimeError("CUDA недоступна: проверьте установку драйвера и torch+CUDA.")
+device = "cuda"
+print("torch.cuda.is_available:", torch.cuda.is_available())
+print("torch.cuda.device_count:", torch.cuda.device_count())
+print("torch.cuda.device_name:", torch.cuda.get_device_name(0))
 print("device:", device)
 
 model = PPO(

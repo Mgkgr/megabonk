@@ -516,6 +516,12 @@ class MegabonkEnv(gym.Env):
         reward_coin_hsv_lower: tuple[int, int, int] = (18, 120, 80),
         reward_coin_hsv_upper: tuple[int, int, int] = (35, 255, 255),
         reward_stuck_diff_threshold: float = 3.0,
+        safety_enabled: bool = True,
+        safety_strength: float = 1.0,
+        safety_anneal_steps: int = 200_000,
+        safety_min_strength: float = 0.0,
+        safety_danger_frac_threshold: float = 0.02,
+        safety_stuck_enabled: bool = True,
     ):
         super().__init__()
         self.cap = cap
@@ -639,6 +645,15 @@ class MegabonkEnv(gym.Env):
         self.reward_stuck_diff_threshold = float(reward_stuck_diff_threshold)
         self._last_reward_gray = None
         self._last_reward_forward = False
+        self.safety_enabled = bool(safety_enabled)
+        self.safety_strength = float(safety_strength)
+        self.safety_anneal_steps = max(0, int(safety_anneal_steps))
+        self.safety_min_strength = float(safety_min_strength)
+        self.safety_danger_frac_threshold = float(safety_danger_frac_threshold)
+        self.safety_stuck_enabled = bool(safety_stuck_enabled)
+        self._safety_step_count = 0
+        self._last_safety_gray = None
+        self._last_safety_forward = False
         self._start_hud_thread()
 
     def _debug_death_like(self, frame, every_s=2.0):
@@ -873,6 +888,51 @@ class MegabonkEnv(gym.Env):
             return False
         return float(diff.mean()) < self.reward_stuck_diff_threshold
 
+    def _is_safety_stuck(self, frame, forwardish):
+        if not self.safety_stuck_enabled:
+            return False
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if self._last_safety_gray is None:
+            self._last_safety_gray = gray
+            self._last_safety_forward = forwardish
+            return False
+        diff = cv2.absdiff(gray, self._last_safety_gray)
+        self._last_safety_gray = gray
+        was_forward = self._last_safety_forward
+        self._last_safety_forward = forwardish
+        if not was_forward:
+            return False
+        return float(diff.mean()) < self.reward_stuck_diff_threshold
+
+    def _current_safety_strength(self) -> float:
+        if not self.safety_enabled:
+            return 0.0
+        if self.safety_anneal_steps <= 0:
+            return max(0.0, self.safety_strength)
+        progress = min(1.0, self._safety_step_count / float(self.safety_anneal_steps))
+        strength = self.safety_strength * (1.0 - progress)
+        return max(self.safety_min_strength, strength)
+
+    def _apply_safety_override(self, dir_id, yaw, pitch, jump, slide, danger_now, stuck_now):
+        strength = self._current_safety_strength()
+        if strength <= 0.0:
+            return dir_id, yaw, pitch, jump, slide, None, strength
+        if not (danger_now or stuck_now):
+            return dir_id, yaw, pitch, jump, slide, None, strength
+        if random.random() > strength:
+            return dir_id, yaw, pitch, jump, slide, None, strength
+        if danger_now:
+            safe_dir = 2
+            safe_jump = 1
+            safe_slide = 0
+            reason = "danger"
+        else:
+            safe_dir = 0
+            safe_jump = 1
+            safe_slide = 0
+            reason = "stuck"
+        return safe_dir, 1, 1, safe_jump, safe_slide, reason, strength
+
     def _get_obs(self):
         # гарантируем ровно frame_stack кадров всегда
         if len(self.frames) == 0:
@@ -946,6 +1006,9 @@ class MegabonkEnv(gym.Env):
         autopilot_action = None
         death_like_now = False
         action_source = "agent"
+        safety_reason = None
+        safety_strength = self._current_safety_strength()
+        safety_override = False
 
         self._submit_hud_frame(frame)
         hud_time_val = self._get_cached_hud_time()
@@ -997,6 +1060,16 @@ class MegabonkEnv(gym.Env):
             dir_id, jump, slide = action
         self._prof_add("preprocess", time.perf_counter() - preprocess_start)
 
+        danger_center, danger_area, danger_frac = self._find_center_area_in_roi(
+            frame,
+            self.reward_enemy_hsv_lower,
+            self.reward_enemy_hsv_upper,
+            self.reward_enemy_roi,
+        )
+        danger_now = danger_center is not None and danger_area > 0 and danger_frac >= self.safety_danger_frac_threshold
+        forwardish_for_safety = dir_id in (1, 5, 6)
+        stuck_now = self._is_safety_stuck(frame, forwardish_for_safety)
+
         if self.use_heuristic_autopilot and self.heuristic_pilot:
             death_start = time.perf_counter()
             gray84 = self._to_gray84(frame)
@@ -1028,6 +1101,35 @@ class MegabonkEnv(gym.Env):
             action_source = "heuristic"
             if reason == "unstuck":
                 self._log_event("UNSTUCK", reason=reason)
+
+        (
+            dir_id,
+            yaw,
+            pitch,
+            jump,
+            slide,
+            safety_reason,
+            safety_strength,
+        ) = self._apply_safety_override(
+            dir_id,
+            yaw,
+            pitch,
+            jump,
+            slide,
+            danger_now,
+            stuck_now,
+        )
+        if safety_reason is not None:
+            safety_override = True
+            action_source = "safety"
+            self._log_event(
+                "SAFETY_OVERRIDE",
+                reason=safety_reason,
+                strength=safety_strength,
+                danger=danger_now,
+                stuck=stuck_now,
+            )
+        self._safety_step_count += 1
 
         input_start = time.perf_counter()
         self._apply_cam_yaw(yaw)
@@ -1127,6 +1229,9 @@ class MegabonkEnv(gym.Env):
                     "r_alive": r_alive,
                     "r_xp": r_xp,
                     "r_dmg": r_dmg,
+                    "safety_override": safety_override,
+                    "safety_reason": safety_reason,
+                    "safety_strength": safety_strength,
                     "autopilot": autopilot_action,
                     "time": self._get_cached_hud_time(),
                 }
@@ -1135,12 +1240,6 @@ class MegabonkEnv(gym.Env):
             r_alive += 0.01
 
         forwardish = dir_id in (1, 5, 6)
-        danger_center, danger_area, danger_frac = self._find_center_area_in_roi(
-            frame,
-            self.reward_enemy_hsv_lower,
-            self.reward_enemy_hsv_upper,
-            self.reward_enemy_roi,
-        )
         loot_center, loot_area, loot_frac = self._find_center_area_in_roi(
             frame,
             self.reward_coin_hsv_lower,
@@ -1171,6 +1270,9 @@ class MegabonkEnv(gym.Env):
             "r_danger": r_danger,
             "r_stuck": r_stuck,
             "r_loot": r_loot,
+            "safety_override": safety_override,
+            "safety_reason": safety_reason,
+            "safety_strength": safety_strength,
             "autopilot": autopilot_action,
             "time": self._get_cached_hud_time(),
         }
