@@ -6,6 +6,7 @@ import ctypes  # noqa: E402
 import time  # noqa: E402
 import random  # noqa: E402
 import atexit  # noqa: E402
+import threading  # noqa: E402
 from pathlib import Path  # noqa: E402
 from collections import deque  # noqa: E402
 
@@ -504,7 +505,7 @@ class MegabonkEnv(gym.Env):
         debug_recognition_window: str = "Megabonk Recognition",
         debug_recognition_topmost: bool = True,
         debug_recognition_transparent: bool = True,
-        hud_ocr_every_s: float = 1.5,
+        hud_ocr_every_s: float = 0.8,
         death_check_every: int = 8,
         reward_danger_k: float = 0.15,
         reward_stuck_k: float = 0.08,
@@ -605,6 +606,11 @@ class MegabonkEnv(gym.Env):
         self._dbg_hud_ts = 0.0
         self._hud_ocr_ts = 0.0
         self._last_hud_values: dict[str, str] = {}
+        self._hud_frame = None
+        self._hud_lock = threading.Lock()
+        self._hud_stop = threading.Event()
+        self._hud_thread = None
+        self._event_lock = threading.Lock()
         self._event_idx = 0
         self._prof_last_log_ts = time.time()
         self._prof_step_count = 0
@@ -628,6 +634,7 @@ class MegabonkEnv(gym.Env):
         self.reward_stuck_diff_threshold = float(reward_stuck_diff_threshold)
         self._last_reward_gray = None
         self._last_reward_forward = False
+        self._start_hud_thread()
 
     def _debug_death_like(self, frame, every_s=2.0):
         now = time.time()
@@ -665,14 +672,15 @@ class MegabonkEnv(gym.Env):
         )
 
     def _log_event(self, name: str, **fields):
-        self._event_idx += 1
-        parts = [f"[EVT] {self._event_idx:06d} {name}"]
-        for key, value in sorted(fields.items()):
-            if isinstance(value, float):
-                parts.append(f"{key}={value:.3f}")
-            else:
-                parts.append(f"{key}={value}")
-        print(" ".join(parts))
+        with self._event_lock:
+            self._event_idx += 1
+            parts = [f"[EVT] {self._event_idx:06d} {name}"]
+            for key, value in sorted(fields.items()):
+                if isinstance(value, float):
+                    parts.append(f"{key}={value:.3f}")
+                else:
+                    parts.append(f"{key}={value}")
+            print(" ".join(parts))
 
     def _prof_add(self, stage: str, duration_s: float):
         if stage in self._prof_accum:
@@ -702,22 +710,53 @@ class MegabonkEnv(gym.Env):
         for key in self._prof_accum:
             self._prof_accum[key] = 0.0
 
-    def _maybe_update_hud_values(self, frame, now):
-        if self.hud_ocr_every_s <= 0:
-            return None
-        if now - self._hud_ocr_ts < self.hud_ocr_every_s:
+    def _start_hud_thread(self):
+        if self.hud_ocr_every_s <= 0 or self._hud_thread is not None:
+            return
+        self._hud_stop.clear()
+        self._hud_thread = threading.Thread(target=self._hud_ocr_loop, daemon=True)
+        self._hud_thread.start()
+
+    def _stop_hud_thread(self):
+        if self._hud_thread is None:
+            return
+        self._hud_stop.set()
+        self._hud_thread.join(timeout=1.0)
+        self._hud_thread = None
+
+    def _submit_hud_frame(self, frame):
+        if self.hud_ocr_every_s <= 0 or frame is None:
+            return
+        with self._hud_lock:
+            self._hud_frame = frame
+
+    def _get_cached_hud_time(self):
+        with self._hud_lock:
             return self._last_hud_values.get("time")
-        self._hud_ocr_ts = now
-        hud_start = time.perf_counter()
-        hud_values = read_hud_values(frame, regions=self.regions)
-        self._prof_add("hud", time.perf_counter() - hud_start)
-        self._last_hud_values = hud_values
-        time_val = hud_values.get("time")
-        if time_val is None:
-            self._log_event("HUD_TIME_FAIL", time=time_val)
-        else:
-            self._log_event("HUD_TIME_OK", time=time_val)
-        return time_val
+
+    def _hud_ocr_loop(self):
+        while not self._hud_stop.is_set():
+            if self.hud_ocr_every_s <= 0:
+                time.sleep(0.1)
+                continue
+            now = time.time()
+            if now - self._hud_ocr_ts < self.hud_ocr_every_s:
+                time.sleep(0.01)
+                continue
+            with self._hud_lock:
+                frame = self._hud_frame
+            if frame is None:
+                time.sleep(0.01)
+                continue
+            self._hud_ocr_ts = now
+            hud_values = read_hud_values(frame, regions=self.regions)
+            with self._hud_lock:
+                self._last_hud_values = hud_values
+            time_val = hud_values.get("time")
+            if time_val is None:
+                self._log_event("HUD_TIME_FAIL", time=time_val)
+            else:
+                self._log_event("HUD_TIME_OK", time=time_val)
 
     def _finish_step_profile(self):
         self._prof_step_count += 1
@@ -902,7 +941,8 @@ class MegabonkEnv(gym.Env):
         death_like_now = False
         action_source = "agent"
 
-        hud_time_val = self._maybe_update_hud_values(frame, now)
+        self._submit_hud_frame(frame)
+        hud_time_val = self._get_cached_hud_time()
         preprocess_start = time.perf_counter()
         # Упрощённый режим: оставляем только распознавание поверхностей/врагов в логах,
         # отключаем логику HUD/апгрейдов/меню и любые HUD-оверлеи.
@@ -920,11 +960,7 @@ class MegabonkEnv(gym.Env):
                 surfaces = sum(1 for cell in analysis.get("grid", []) if cell.label == "surface")
                 enemies = len(analysis.get("enemies", []))
                 dbg_path = self._dump_recognition_debug(frame, analysis)
-                time_val = (
-                    hud_time_val
-                    if hud_time_val is not None
-                    else self._last_hud_values.get("time")
-                )
+                time_val = hud_time_val
                 if time_val is not None:
                     print(
                         f"[DBG] scene surfaces={surfaces} enemies={enemies} "
@@ -1093,7 +1129,7 @@ class MegabonkEnv(gym.Env):
                     "r_xp": r_xp,
                     "r_dmg": r_dmg,
                     "autopilot": autopilot_action,
-                    "time": self._last_hud_values.get("time"),
+                    "time": self._get_cached_hud_time(),
                 }
                 self._finish_step_profile()
                 return obs, float(reward), terminated, False, info
@@ -1137,7 +1173,7 @@ class MegabonkEnv(gym.Env):
             "r_stuck": r_stuck,
             "r_loot": r_loot,
             "autopilot": autopilot_action,
-            "time": self._last_hud_values.get("time"),
+            "time": self._get_cached_hud_time(),
         }
         self._finish_step_profile()
         return obs, float(reward), terminated, False, info
@@ -1168,3 +1204,7 @@ class MegabonkEnv(gym.Env):
         time_cells_black = _top_left_time_cells_black(gray84)
         hud_dark = _hud_pixels_dark(gray84)
         return (not time_cells_black) and (not hud_dark)
+
+    def close(self):
+        self._stop_hud_thread()
+        super().close()
