@@ -19,7 +19,7 @@ from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
 from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
-from megabonk_bot.hud import read_hud_values  # noqa: E402
+from megabonk_bot.hud import HUD_TIME_RECT, read_hud_telemetry  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -592,11 +592,14 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition = bool(debug_recognition)
         self.debug_recognition_dir = Path(debug_recognition_dir)
         self.debug_recognition_every_s = float(debug_recognition_every_s)
+        self.debug_hud_dir = Path("dbg_hud")
+        self._hud_debug_saved = False
         self.hud_ocr_every_s = float(hud_ocr_every_s)
         self.recognition_grid = recognition_grid
         self._dbg_recognition_idx = 0
         if self.debug_recognition:
             self.debug_recognition_dir.mkdir(parents=True, exist_ok=True)
+        self.debug_hud_dir.mkdir(parents=True, exist_ok=True)
 
         # как “перезапускать” ран (подстроишь под меню)
         self.reset_sequence = reset_sequence or [
@@ -616,7 +619,7 @@ class MegabonkEnv(gym.Env):
         self._dbg_recognition_ts = 0.0
         self._dbg_hud_ts = 0.0
         self._hud_ocr_ts = 0.0
-        self._last_hud_values: dict[str, str] = {}
+        self._last_hud_values: dict[str, object] = {}
         self._hud_frame = None
         self._hud_lock = threading.Lock()
         self._hud_stop = threading.Event()
@@ -754,6 +757,24 @@ class MegabonkEnv(gym.Env):
         with self._hud_lock:
             return self._last_hud_values.get("time")
 
+    def _get_cached_hp_ratio(self):
+        with self._hud_lock:
+            return self._last_hud_values.get("hp_ratio")
+
+    def _dump_hud_time_debug(self, frame, *, reason: str):
+        if frame is None or frame.size == 0:
+            return None
+        canvas = frame.copy()
+        x, y, w, h = HUD_TIME_RECT
+        x1 = min(canvas.shape[1] - 1, x + w)
+        y1 = min(canvas.shape[0] - 1, y + h)
+        cv2.rectangle(canvas, (x, y), (x1, y1), (0, 255, 255), 2)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"hud_time_{reason}_{ts}.png"
+        out_path = self.debug_hud_dir / filename
+        cv2.imwrite(str(out_path), canvas)
+        return out_path
+
     def _hud_ocr_loop(self):
         while not self._hud_stop.is_set():
             if self.hud_ocr_every_s <= 0:
@@ -769,14 +790,44 @@ class MegabonkEnv(gym.Env):
                 time.sleep(0.01)
                 continue
             self._hud_ocr_ts = now
-            hud_values = read_hud_values(frame, regions=self.regions)
+            hud_values = read_hud_telemetry(frame, regions=self.regions)
+            if not self._hud_debug_saved:
+                self._dump_hud_time_debug(frame, reason="startup")
+                self._hud_debug_saved = True
+            if hud_values.get("time") is None:
+                self._dump_hud_time_debug(
+                    frame,
+                    reason=hud_values.get("time_fail_reason") or "fail",
+                )
             with self._hud_lock:
                 self._last_hud_values = hud_values
             time_val = hud_values.get("time")
+            time_reason = hud_values.get("time_fail_reason")
+            ocr_ms = hud_values.get("time_ocr_ms")
+            tesseract_cmd = hud_values.get("tesseract_cmd")
+            hp_ratio = hud_values.get("hp_ratio")
             if time_val is None:
-                self._log_event("HUD_TIME_FAIL", time=time_val)
+                self._log_event(
+                    "HUD_TIME_FAIL",
+                    fail_reason=time_reason,
+                    ocr_ms=ocr_ms,
+                    recognized_time=time_val,
+                    tesseract_cmd=tesseract_cmd,
+                )
             else:
-                self._log_event("HUD_TIME_OK", time=time_val)
+                self._log_event(
+                    "HUD_TIME_OK",
+                    ocr_ms=ocr_ms,
+                    recognized_time=time_val,
+                    tesseract_cmd=tesseract_cmd,
+                )
+            if hp_ratio is None:
+                self._log_event(
+                    "HUD_HP_FAIL",
+                    fail_reason=hud_values.get("hp_fail_reason"),
+                )
+            else:
+                self._log_event("HUD_HP_OK", hp_ratio=hp_ratio)
 
     def _finish_step_profile(self):
         self._prof_step_count += 1
@@ -1234,6 +1285,7 @@ class MegabonkEnv(gym.Env):
                     "safety_strength": safety_strength,
                     "autopilot": autopilot_action,
                     "time": self._get_cached_hud_time(),
+                    "hp_ratio": self._get_cached_hp_ratio(),
                 }
                 self._finish_step_profile()
                 return obs, float(reward), terminated, False, info
@@ -1275,6 +1327,7 @@ class MegabonkEnv(gym.Env):
             "safety_strength": safety_strength,
             "autopilot": autopilot_action,
             "time": self._get_cached_hud_time(),
+            "hp_ratio": self._get_cached_hp_ratio(),
         }
         self._finish_step_profile()
         return obs, float(reward), terminated, False, info

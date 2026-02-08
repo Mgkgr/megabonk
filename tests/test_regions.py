@@ -19,6 +19,4 @@ def test_hud_time_region_clamps_to_small_frame():
     regions = build_regions(100, 80)
     x, y, w, h = regions["REG_HUD_TIME"]
     assert (x, y) == (28, 61)
-    assert w > 0 and h > 0
-    assert x + w <= 100
-    assert y + h <= 80
+    assert (w, h) == (127, 41)
