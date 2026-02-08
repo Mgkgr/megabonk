@@ -231,7 +231,14 @@ class HeuristicAutoPilot:
         center_roi=(0.35, 0.38, 0.30, 0.36),
         center_lower_roi=(0.35, 0.55, 0.30, 0.35),
         stuck_diff_threshold=3.0,
-        scan_period=12,
+        stuck_frames_required=6,
+        stuck_escape_ticks=16,
+        jump_cooldown=30,
+        slide_cooldown=24,
+        enemy_close_multiplier=1.6,
+        scan_interval=60,
+        scan_duration=8,
+        scan_decision_ticks=10,
     ):
         self.enemy_hsv_lower = np.array(enemy_hsv_lower, dtype=np.uint8)
         self.enemy_hsv_upper = np.array(enemy_hsv_upper, dtype=np.uint8)
@@ -242,22 +249,40 @@ class HeuristicAutoPilot:
         self.center_roi = center_roi
         self.center_lower_roi = center_lower_roi
         self.stuck_diff_threshold = float(stuck_diff_threshold)
-        self.scan_period = int(scan_period)
-        self._scan_dir = -1
-        self._scan_ticks = 0
+        self.stuck_frames_required = int(stuck_frames_required)
+        self.stuck_escape_ticks = int(stuck_escape_ticks)
+        self.jump_cooldown = int(jump_cooldown)
+        self.slide_cooldown = int(slide_cooldown)
+        self.enemy_close_multiplier = float(enemy_close_multiplier)
+        self.scan_interval = int(scan_interval)
+        self.scan_duration = int(scan_duration)
+        self.scan_decision_ticks = int(scan_decision_ticks)
+        self._scan_state = "idle"
+        self._scan_timer = 0
+        self._scan_interval_timer = 0
+        self._scan_scores = {"left": 0.0, "right": 0.0}
+        self._scan_decision_dir = 0
         self._last_gray = None
         self._last_forward = False
         self._stuck_toggle = False
+        self._stuck_frames = 0
+        self._stuck_escape_timer = 0
+        self._tick = 0
+        self._last_jump_tick = -9999
+        self._last_slide_tick = -9999
 
     def act(self, frame, include_cam_yaw=True):
+        self._tick += 1
         h, w = frame.shape[:2]
-        danger_center, danger_area = self._find_center_in_roi(
+        mask, _ = self._mask_in_roi(
             frame, self.enemy_hsv_lower, self.enemy_hsv_upper, self.center_lower_roi
         )
+        danger_left, danger_center, danger_right, danger_area = self._sector_danger(mask)
         loot_center, loot_area = self._find_center_in_roi(
             frame, self.coin_hsv_lower, self.coin_hsv_upper, self.center_roi
         )
         danger = danger_area >= self.enemy_area_threshold
+        danger_front = danger_center >= self.enemy_area_threshold
         loot = loot_area >= self.coin_area_threshold
 
         center_x = w * 0.5
@@ -267,15 +292,15 @@ class HeuristicAutoPilot:
         slide = 0
         reason = "cruise"
 
-        if danger and danger_center is not None:
-            slide = 1
-            if danger_center[0] < center_x:
-                dir_id = 4
-                yaw = 2
-            else:
-                dir_id = 3
-                yaw = 0
-            reason = "evade_enemy"
+        if danger_front:
+            safer_left = danger_left <= danger_right
+            dir_id = 3 if safer_left else 4
+            yaw = 0 if safer_left else 2
+            if danger_center >= self.enemy_area_threshold * self.enemy_close_multiplier:
+                if self._tick - self._last_slide_tick >= self.slide_cooldown:
+                    slide = 1
+                    self._last_slide_tick = self._tick
+            reason = "EVADE_ENEMY"
         elif loot and loot_center is not None:
             offset = loot_center[0] - center_x
             if offset < -w * 0.06:
@@ -288,21 +313,29 @@ class HeuristicAutoPilot:
                 dir_id = 1
                 yaw = 1
             reason = "seek_loot"
+        elif self._scan_state != "idle":
+            dir_id, yaw, reason = self._scan_step(danger_area)
         else:
-            yaw = 0 if self._scan_dir < 0 else 2
-            self._scan_ticks += 1
-            if self._scan_ticks >= self.scan_period:
-                self._scan_ticks = 0
-                self._scan_dir *= -1
-            reason = "scan_forward"
+            dir_id, yaw, reason = self._maybe_start_scan()
 
         stuck = self._is_stuck(frame)
         if stuck and not danger:
-            self._stuck_toggle = not self._stuck_toggle
+            if self._stuck_escape_timer == 0:
+                self._stuck_toggle = not self._stuck_toggle
+                self._stuck_escape_timer = self.stuck_escape_ticks
+                if self._tick - self._last_jump_tick >= self.jump_cooldown:
+                    jump = 1
+                    self._last_jump_tick = self._tick
+            if self._stuck_escape_timer > 0:
+                self._stuck_escape_timer -= 1
             dir_id = 3 if self._stuck_toggle else 4
             yaw = 0 if dir_id == 3 else 2
-            jump = 1
-            reason = "unstuck"
+            reason = "UNSTUCK"
+            self._scan_state = "idle"
+            self._scan_interval_timer = 0
+        elif danger:
+            self._scan_state = "idle"
+            self._scan_interval_timer = 0
 
         forwardish = dir_id in (1, 5, 6)
         self._last_forward = forwardish
@@ -319,8 +352,81 @@ class HeuristicAutoPilot:
         diff = cv2.absdiff(gray, self._last_gray)
         self._last_gray = gray
         if not self._last_forward:
+            self._stuck_frames = 0
             return False
-        return float(diff.mean()) < self.stuck_diff_threshold
+        if float(diff.mean()) < self.stuck_diff_threshold:
+            self._stuck_frames += 1
+        else:
+            self._stuck_frames = 0
+        return self._stuck_frames >= self.stuck_frames_required
+
+    def _maybe_start_scan(self):
+        self._scan_interval_timer += 1
+        if self._scan_interval_timer >= self.scan_interval:
+            self._scan_interval_timer = 0
+            self._scan_state = "left"
+            self._scan_timer = 0
+            self._scan_scores = {"left": 0.0, "right": 0.0}
+            return 1, 0, "SCAN_START"
+        return 1, 1, "cruise"
+
+    def _scan_step(self, danger_area):
+        if self._scan_state == "left":
+            self._scan_scores["left"] += danger_area
+            self._scan_timer += 1
+            if self._scan_timer >= self.scan_duration:
+                self._scan_state = "right"
+                self._scan_timer = 0
+            return 1, 0, "SCAN_SWEEP"
+        if self._scan_state == "right":
+            self._scan_scores["right"] += danger_area
+            self._scan_timer += 1
+            if self._scan_timer >= self.scan_duration:
+                self._scan_state = "decision"
+                self._scan_timer = self.scan_decision_ticks
+                if self._scan_scores["left"] <= self._scan_scores["right"]:
+                    self._scan_decision_dir = -1
+                else:
+                    self._scan_decision_dir = 1
+                return 1, 0 if self._scan_decision_dir < 0 else 2, "SCAN_DECISION"
+            return 1, 2, "SCAN_SWEEP"
+        if self._scan_state == "decision":
+            self._scan_timer -= 1
+            yaw = 0 if self._scan_decision_dir < 0 else 2
+            if self._scan_timer <= 0:
+                self._scan_state = "idle"
+            return 1, yaw, "SCAN_DECISION"
+        self._scan_state = "idle"
+        return 1, 1, "cruise"
+
+    def _mask_in_roi(self, frame, lower, upper, roi_rel):
+        h, w = frame.shape[:2]
+        x0 = int(roi_rel[0] * w)
+        y0 = int(roi_rel[1] * h)
+        rw = int(roi_rel[2] * w)
+        rh = int(roi_rel[3] * h)
+        x1 = min(w, x0 + rw)
+        y1 = min(h, y0 + rh)
+        if x1 <= x0 or y1 <= y0:
+            return None, (x0, y0, x1, y1)
+        roi = frame[y0:y1, x0:x1]
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, lower, upper)
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        return mask, (x0, y0, x1, y1)
+
+    def _sector_danger(self, mask):
+        if mask is None:
+            return 0.0, 0.0, 0.0, 0.0
+        h, w = mask.shape[:2]
+        third = max(1, w // 3)
+        left = float(np.count_nonzero(mask[:, :third]))
+        center = float(np.count_nonzero(mask[:, third : 2 * third]))
+        right = float(np.count_nonzero(mask[:, 2 * third :]))
+        total = left + center + right
+        return left, center, right, total
 
     def _find_center_in_roi(self, frame, lower, upper, roi_rel):
         h, w = frame.shape[:2]
