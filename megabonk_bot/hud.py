@@ -10,6 +10,8 @@ import numpy as np
 
 LOGGER = logging.getLogger(__name__)
 
+HUD_TIME_RECT = (28, 61, 127, 41)
+
 _TESSERACT_LAST_ERROR_AT = None
 _TESSERACT_LAST_WARNED_AT = 0.0
 _TESSERACT_CONFIGURED = False
@@ -196,6 +198,120 @@ def _parse_time(text):
     if not digits:
         return None
     return int("".join(digits))
+
+
+def _resolve_time_roi(frame_bgr):
+    if frame_bgr is None or frame_bgr.size == 0:
+        return None, "frame_empty"
+    h, w = frame_bgr.shape[:2]
+    x, y, rw, rh = HUD_TIME_RECT
+    if w < x + rw or h < y + rh:
+        return None, f"frame_too_small:{w}x{h}"
+    roi = frame_bgr[y : y + rh, x : x + rw]
+    if roi.size == 0:
+        return None, "roi_empty"
+    return roi, None
+
+
+def read_hud_time(frame_bgr, *, min_conf=45.0):
+    t0 = time.perf_counter()
+    roi, fail_reason = _resolve_time_roi(frame_bgr)
+    if roi is None:
+        return {
+            "time": None,
+            "fail_reason": fail_reason,
+            "ocr_ms": 0.0,
+            "rect": HUD_TIME_RECT,
+            "tesseract_cmd": None,
+        }
+
+    pytesseract = _get_tesseract()
+    if pytesseract is None:
+        if _TESSERACT_LAST_ERROR_AT is not None:
+            _warn_missing_tesseract()
+        else:
+            LOGGER.debug("pytesseract не найден — HUD OCR отключён")
+        return {
+            "time": None,
+            "fail_reason": "tesseract_missing",
+            "ocr_ms": (time.perf_counter() - t0) * 1000.0,
+            "rect": HUD_TIME_RECT,
+            "tesseract_cmd": None,
+        }
+
+    tesseract_cmd = pytesseract.pytesseract.tesseract_cmd
+    text, conf = _best_ocr(roi, whitelist="0123456789:", psm=7)
+    ocr_ms = (time.perf_counter() - t0) * 1000.0
+    if text is None or conf is None:
+        return {
+            "time": None,
+            "fail_reason": "ocr_empty",
+            "ocr_ms": ocr_ms,
+            "rect": HUD_TIME_RECT,
+            "tesseract_cmd": tesseract_cmd,
+        }
+    time_val = _parse_time(text)
+    if time_val is None:
+        if conf < min_conf * 0.5:
+            fail_reason = f"low_conf:{conf:.1f}"
+        else:
+            fail_reason = "parse_failed"
+        return {
+            "time": None,
+            "fail_reason": fail_reason,
+            "ocr_ms": ocr_ms,
+            "rect": HUD_TIME_RECT,
+            "tesseract_cmd": tesseract_cmd,
+        }
+    return {
+        "time": time_val,
+        "fail_reason": None,
+        "ocr_ms": ocr_ms,
+        "rect": HUD_TIME_RECT,
+        "tesseract_cmd": tesseract_cmd,
+    }
+
+
+def read_hud_hp_ratio(frame_bgr, regions=None):
+    if frame_bgr is None or frame_bgr.size == 0:
+        return None, "frame_empty"
+    rect = _resolve_region(frame_bgr, regions, "hp")
+    if rect is None:
+        return None, "hp_region_missing"
+    x, y, w, h = rect
+    h_img, w_img = frame_bgr.shape[:2]
+    if w_img < x + w or h_img < y + h:
+        return None, f"frame_too_small:{w_img}x{h_img}"
+    roi = frame_bgr[y : y + h, x : x + w]
+    if roi.size == 0:
+        return None, "roi_empty"
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    lower1 = np.array([0, 90, 60])
+    upper1 = np.array([10, 255, 255])
+    lower2 = np.array([170, 90, 60])
+    upper2 = np.array([180, 255, 255])
+    mask1 = cv2.inRange(hsv, lower1, upper1)
+    mask2 = cv2.inRange(hsv, lower2, upper2)
+    mask = cv2.bitwise_or(mask1, mask2)
+    red_pixels = int(np.count_nonzero(mask))
+    total_pixels = int(mask.size)
+    if total_pixels == 0:
+        return None, "roi_empty"
+    return red_pixels / float(total_pixels), None
+
+
+def read_hud_telemetry(frame_bgr, regions=None):
+    time_info = read_hud_time(frame_bgr)
+    hp_ratio, hp_fail_reason = read_hud_hp_ratio(frame_bgr, regions=regions)
+    return {
+        "time": time_info["time"],
+        "time_fail_reason": time_info["fail_reason"],
+        "time_ocr_ms": time_info["ocr_ms"],
+        "time_rect": time_info["rect"],
+        "tesseract_cmd": time_info["tesseract_cmd"],
+        "hp_ratio": hp_ratio,
+        "hp_fail_reason": hp_fail_reason,
+    }
 
 
 def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
