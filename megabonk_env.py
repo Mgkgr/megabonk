@@ -599,10 +599,23 @@ class MegabonkEnv(gym.Env):
         self._last_dead_r_time = 0.0
         self._death_check_every = max(1, int(death_check_every))
         self._death_check_idx = 0
+        self._death_like_streak = 0
         self._dbg_death_ts = 0.0
         self._dbg_recognition_ts = 0.0
         self._dbg_hud_ts = 0.0
+        self._hud_ocr_ts = 0.0
         self._last_hud_values: dict[str, str] = {}
+        self._event_idx = 0
+        self._prof_last_log_ts = time.time()
+        self._prof_step_count = 0
+        self._prof_accum = {
+            "capture": 0.0,
+            "preprocess": 0.0,
+            "death": 0.0,
+            "hud": 0.0,
+            "policy": 0.0,
+            "input": 0.0,
+        }
         self.reward_danger_k = float(reward_danger_k)
         self.reward_stuck_k = float(reward_stuck_k)
         self.reward_loot_k = float(reward_loot_k)
@@ -650,6 +663,65 @@ class MegabonkEnv(gym.Env):
             f"best_tpl={best_tpl} best_score={best_score:.3f} "
             f"confirm_tpl={confirm_tpl} confirm_score={confirm_score:.3f}"
         )
+
+    def _log_event(self, name: str, **fields):
+        self._event_idx += 1
+        parts = [f"[EVT] {self._event_idx:06d} {name}"]
+        for key, value in sorted(fields.items()):
+            if isinstance(value, float):
+                parts.append(f"{key}={value:.3f}")
+            else:
+                parts.append(f"{key}={value}")
+        print(" ".join(parts))
+
+    def _prof_add(self, stage: str, duration_s: float):
+        if stage in self._prof_accum:
+            self._prof_accum[stage] += float(duration_s)
+
+    def _maybe_log_profile(self):
+        now = time.time()
+        dt = now - self._prof_last_log_ts
+        if dt < 1.0:
+            return
+        steps = max(1, self._prof_step_count)
+        capture_ms = self._prof_accum["capture"] / steps * 1000.0
+        preprocess_ms = self._prof_accum["preprocess"] / steps * 1000.0
+        death_ms = self._prof_accum["death"] / steps * 1000.0
+        hud_ms = self._prof_accum["hud"] / steps * 1000.0
+        policy_ms = self._prof_accum["policy"] / steps * 1000.0
+        input_ms = self._prof_accum["input"] / steps * 1000.0
+        fps_est = steps / dt
+        print(
+            "dt="
+            f"{dt:.2f}s capture={capture_ms:.2f}ms preprocess={preprocess_ms:.2f}ms "
+            f"death={death_ms:.2f}ms hud={hud_ms:.2f}ms policy={policy_ms:.2f}ms "
+            f"input={input_ms:.2f}ms fps_est={fps_est:.2f}"
+        )
+        self._prof_last_log_ts = now
+        self._prof_step_count = 0
+        for key in self._prof_accum:
+            self._prof_accum[key] = 0.0
+
+    def _maybe_update_hud_values(self, frame, now):
+        if self.hud_ocr_every_s <= 0:
+            return None
+        if now - self._hud_ocr_ts < self.hud_ocr_every_s:
+            return self._last_hud_values.get("time")
+        self._hud_ocr_ts = now
+        hud_start = time.perf_counter()
+        hud_values = read_hud_values(frame, regions=self.regions)
+        self._prof_add("hud", time.perf_counter() - hud_start)
+        self._last_hud_values = hud_values
+        time_val = hud_values.get("time")
+        if time_val is None:
+            self._log_event("HUD_TIME_FAIL", time=time_val)
+        else:
+            self._log_event("HUD_TIME_OK", time=time_val)
+        return time_val
+
+    def _finish_step_profile(self):
+        self._prof_step_count += 1
+        self._maybe_log_profile()
 
     def _apply_cam_yaw(self, yaw_id: int):
         if not self.include_cam_yaw:
@@ -821,11 +893,17 @@ class MegabonkEnv(gym.Env):
         return obs, {}
 
     def step(self, action):
+        capture_start = time.perf_counter()
         frame = self._grab_frame()
+        self._prof_add("capture", time.perf_counter() - capture_start)
+        now = time.time()
         screen = "UNKNOWN"
         autopilot_action = None
         death_like_now = False
+        action_source = "agent"
 
+        hud_time_val = self._maybe_update_hud_values(frame, now)
+        preprocess_start = time.perf_counter()
         # Упрощённый режим: оставляем только распознавание поверхностей/врагов в логах,
         # отключаем логику HUD/апгрейдов/меню и любые HUD-оверлеи.
         if self.debug_recognition:
@@ -842,12 +920,11 @@ class MegabonkEnv(gym.Env):
                 surfaces = sum(1 for cell in analysis.get("grid", []) if cell.label == "surface")
                 enemies = len(analysis.get("enemies", []))
                 dbg_path = self._dump_recognition_debug(frame, analysis)
-                time_val = self._last_hud_values.get("time") if self._last_hud_values else None
-                if self.hud_ocr_every_s > 0 and now - self._dbg_hud_ts >= self.hud_ocr_every_s:
-                    self._dbg_hud_ts = now
-                    hud_values = read_hud_values(frame, regions=self.regions)
-                    self._last_hud_values = hud_values
-                    time_val = hud_values.get("time")
+                time_val = (
+                    hud_time_val
+                    if hud_time_val is not None
+                    else self._last_hud_values.get("time")
+                )
                 if time_val is not None:
                     print(
                         f"[DBG] scene surfaces={surfaces} enemies={enemies} "
@@ -876,8 +953,10 @@ class MegabonkEnv(gym.Env):
                 dir_id, pitch, jump, slide = action
         else:
             dir_id, jump, slide = action
+        self._prof_add("preprocess", time.perf_counter() - preprocess_start)
 
         if self.use_heuristic_autopilot and self.heuristic_pilot:
+            death_start = time.perf_counter()
             gray84 = self._to_gray84(frame)
             death_like_now = is_death_like(
                 gray84,
@@ -887,9 +966,11 @@ class MegabonkEnv(gym.Env):
                 death_tpl_names=self._death_tpl_names,
                 confirm_tpl_names=self._confirm_tpl_names,
             )
+            self._prof_add("death", time.perf_counter() - death_start)
             screen = "DEAD" if death_like_now else "RUNNING"
 
         if self.use_heuristic_autopilot and self.heuristic_pilot and not death_like_now:
+            policy_start = time.perf_counter()
             if self.include_cam_yaw:
                 dir_id, yaw, jump, slide, reason = self.heuristic_pilot.act(
                     frame, include_cam_yaw=True
@@ -898,8 +979,13 @@ class MegabonkEnv(gym.Env):
                 dir_id, jump, slide, reason = self.heuristic_pilot.act(
                     frame, include_cam_yaw=False
                 )
+            self._prof_add("policy", time.perf_counter() - policy_start)
             autopilot_action = f"heuristic:{reason}"
+            action_source = "heuristic"
+            if reason == "unstuck":
+                self._log_event("UNSTUCK", reason=reason)
 
+        input_start = time.perf_counter()
         self._apply_cam_yaw(yaw)
         self._apply_cam_pitch(pitch)
         if self._sticky_left <= 0:
@@ -909,9 +995,12 @@ class MegabonkEnv(gym.Env):
         set_move(int(dir_id))
 
         if int(jump) == 1:
+            self._log_event("JUMP", source=action_source, reason=autopilot_action)
             tap(self.jump_key, dt=0.005)
         if int(slide) == 1:
+            self._log_event("SLIDE", source=action_source, reason=autopilot_action)
             tap(self.slide_key, dt=0.005)
+        self._prof_add("input", time.perf_counter() - input_start)
 
         terminated = False
         r_alive = 0.0
@@ -923,25 +1012,76 @@ class MegabonkEnv(gym.Env):
         frame_skip = random.randint(*self.frame_skip_range)
         for _ in range(frame_skip):
             time.sleep(self.dt)
+            capture_start = time.perf_counter()
             frame_bgr = self._grab_frame()
+            self._prof_add("capture", time.perf_counter() - capture_start)
+            death_start = time.perf_counter()
             f = self._to_gray84(frame_bgr)
             self.frames.append(f)
             self._death_check_idx += 1
             death_suspect = _fast_death_check(f)
             forced_check = self._death_check_idx % self._death_check_every == 0
-            if (death_suspect or forced_check) and is_death_like(
-                f,
-                frame_bgr=frame_bgr,
-                templates=self.templates,
-                regions=self.regions,
-                death_tpl_names=self._death_tpl_names,
-                confirm_tpl_names=self._confirm_tpl_names,
-            ):
+            death_like = False
+            debug_info = {}
+            hard_tpl_threshold = 0.62
+            soft_tpl_threshold = 0.50
+            confirm_threshold = 0.48
+            confirm_mean_threshold = 95.0
+            if death_suspect or forced_check:
+                death_like = is_death_like(
+                    f,
+                    frame_bgr=frame_bgr,
+                    templates=self.templates,
+                    regions=self.regions,
+                    death_tpl_names=self._death_tpl_names,
+                    confirm_tpl_names=self._confirm_tpl_names,
+                    hard_tpl_threshold=hard_tpl_threshold,
+                    soft_tpl_threshold=soft_tpl_threshold,
+                    confirm_threshold=confirm_threshold,
+                    confirm_mean_threshold=confirm_mean_threshold,
+                    debug_info=debug_info,
+                )
+            if death_like:
+                self._death_like_streak += 1
+            else:
+                self._death_like_streak = 0
+            self._prof_add("death", time.perf_counter() - death_start)
+            if death_like:
+                self._log_event(
+                    "DEATH_DETECTED",
+                    best_score=debug_info.get("best_score", 0.0),
+                    best_tpl=debug_info.get("best_tpl"),
+                    confirm_score=debug_info.get("confirm_score", 0.0),
+                    confirm_tpl=debug_info.get("confirm_tpl"),
+                    dark_overlay=debug_info.get("dark_overlay", False),
+                    death_suspect=death_suspect,
+                    death_streak=self._death_like_streak,
+                    forced_check=forced_check,
+                    hud_dark=debug_info.get("hud_dark", False),
+                    hud_mean=debug_info.get("hud_mean", 0.0),
+                    mean=debug_info.get("mean", 0.0),
+                    soft_tpl_threshold=soft_tpl_threshold,
+                    hard_tpl_threshold=hard_tpl_threshold,
+                    confirm_threshold=confirm_threshold,
+                    confirm_mean_threshold=confirm_mean_threshold,
+                    std=debug_info.get("std", 0.0),
+                    time_cells_black=debug_info.get("time_cells_black", False),
+                )
                 terminated = True
                 r_alive = -1.0
                 release_all_keys()
                 self._release_inputs_for_restart()
+                self._log_event(
+                    "RESTART_START",
+                    reason="death_like",
+                    death_streak=self._death_like_streak,
+                )
                 hold("r", dt=3.5)
+                self._log_event(
+                    "RESTART_DONE",
+                    reason="death_like",
+                    death_streak=self._death_like_streak,
+                )
                 self._last_dead_r_time = time.time()
                 obs = self._get_obs()
                 reward = r_alive + r_xp + r_dmg
@@ -955,6 +1095,7 @@ class MegabonkEnv(gym.Env):
                     "autopilot": autopilot_action,
                     "time": self._last_hud_values.get("time"),
                 }
+                self._finish_step_profile()
                 return obs, float(reward), terminated, False, info
             r_alive += 0.01
 
@@ -998,6 +1139,7 @@ class MegabonkEnv(gym.Env):
             "autopilot": autopilot_action,
             "time": self._last_hud_values.get("time"),
         }
+        self._finish_step_profile()
         return obs, float(reward), terminated, False, info
 
     def _release_inputs_for_restart(self):
