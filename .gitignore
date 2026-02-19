@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+logs/
+dbg/
+dbg_hud/
+.idea/

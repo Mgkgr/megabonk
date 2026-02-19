@@ -761,6 +761,14 @@ class MegabonkEnv(gym.Env):
         with self._hud_lock:
             return self._last_hud_values.get("hp_ratio")
 
+    def _get_cached_lvl(self):
+        with self._hud_lock:
+            return self._last_hud_values.get("lvl")
+
+    def _get_cached_kills(self):
+        with self._hud_lock:
+            return self._last_hud_values.get("kills")
+
     def _dump_hud_time_debug(self, frame, *, reason: str):
         if frame is None or frame.size == 0:
             return None
@@ -806,6 +814,8 @@ class MegabonkEnv(gym.Env):
             ocr_ms = hud_values.get("time_ocr_ms")
             tesseract_cmd = hud_values.get("tesseract_cmd")
             hp_ratio = hud_values.get("hp_ratio")
+            lvl_val = hud_values.get("lvl")
+            kills_val = hud_values.get("kills")
             if time_val is None:
                 self._log_event(
                     "HUD_TIME_FAIL",
@@ -828,6 +838,20 @@ class MegabonkEnv(gym.Env):
                 )
             else:
                 self._log_event("HUD_HP_OK", hp_ratio=hp_ratio)
+            if lvl_val is None:
+                self._log_event(
+                    "HUD_LVL_FAIL",
+                    fail_reason=hud_values.get("lvl_fail_reason"),
+                )
+            else:
+                self._log_event("HUD_LVL_OK", lvl=lvl_val)
+            if kills_val is None:
+                self._log_event(
+                    "HUD_KILLS_FAIL",
+                    fail_reason=hud_values.get("kills_fail_reason"),
+                )
+            else:
+                self._log_event("HUD_KILLS_OK", kills=kills_val)
 
     def _finish_step_profile(self):
         self._prof_step_count += 1
@@ -1286,6 +1310,8 @@ class MegabonkEnv(gym.Env):
                     "autopilot": autopilot_action,
                     "time": self._get_cached_hud_time(),
                     "hp_ratio": self._get_cached_hp_ratio(),
+                    "lvl": self._get_cached_lvl(),
+                    "kills": self._get_cached_kills(),
                 }
                 self._finish_step_profile()
                 return obs, float(reward), terminated, False, info
@@ -1328,6 +1354,8 @@ class MegabonkEnv(gym.Env):
             "autopilot": autopilot_action,
             "time": self._get_cached_hud_time(),
             "hp_ratio": self._get_cached_hp_ratio(),
+            "lvl": self._get_cached_lvl(),
+            "kills": self._get_cached_kills(),
         }
         self._finish_step_profile()
         return obs, float(reward), terminated, False, info

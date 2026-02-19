@@ -23,6 +23,8 @@ DEFAULT_HUD_REGIONS = {
     "hp": (0.04, 0.02, 0.12, 0.05),
     "gold": (0.85, 0.02, 0.12, 0.05),
     "time": (0.39, 0.012, 0.22, 0.06),
+    "lvl": (0.74, 0.08, 0.10, 0.05),
+    "kills": (0.63, 0.08, 0.10, 0.05),
 }
 
 
@@ -272,6 +274,130 @@ def read_hud_time(frame_bgr, *, min_conf=45.0):
     }
 
 
+def _read_hud_number(frame_bgr, *, key, regions=None, min_conf=45.0):
+    t0 = time.perf_counter()
+    if frame_bgr is None or frame_bgr.size == 0:
+        return {
+            "value": None,
+            "fail_reason": "frame_empty",
+            "ocr_ms": 0.0,
+            "rect": None,
+            "tesseract_cmd": None,
+        }
+
+    rect = _resolve_region(frame_bgr, regions, key)
+    if rect is None:
+        return {
+            "value": None,
+            "fail_reason": f"{key}_region_missing",
+            "ocr_ms": 0.0,
+            "rect": None,
+            "tesseract_cmd": None,
+        }
+    x, y, w, h = rect
+    h_img, w_img = frame_bgr.shape[:2]
+    if w_img < x + w or h_img < y + h:
+        return {
+            "value": None,
+            "fail_reason": f"frame_too_small:{w_img}x{h_img}",
+            "ocr_ms": 0.0,
+            "rect": rect,
+            "tesseract_cmd": None,
+        }
+    roi = frame_bgr[y : y + h, x : x + w]
+    if roi.size == 0:
+        return {
+            "value": None,
+            "fail_reason": "roi_empty",
+            "ocr_ms": 0.0,
+            "rect": rect,
+            "tesseract_cmd": None,
+        }
+
+    pytesseract = _get_tesseract()
+    if pytesseract is None:
+        if _TESSERACT_LAST_ERROR_AT is not None:
+            _warn_missing_tesseract()
+        else:
+            LOGGER.debug("pytesseract не найден — HUD OCR отключён")
+        return {
+            "value": None,
+            "fail_reason": "tesseract_missing",
+            "ocr_ms": (time.perf_counter() - t0) * 1000.0,
+            "rect": rect,
+            "tesseract_cmd": None,
+        }
+
+    text, conf = _best_ocr(roi, whitelist="0123456789", psm=7)
+    ocr_ms = (time.perf_counter() - t0) * 1000.0
+    tesseract_cmd = pytesseract.pytesseract.tesseract_cmd
+    if text is None or conf is None:
+        return {
+            "value": None,
+            "fail_reason": "ocr_empty",
+            "ocr_ms": ocr_ms,
+            "rect": rect,
+            "tesseract_cmd": tesseract_cmd,
+        }
+    if conf < min_conf * 0.6:
+        return {
+            "value": None,
+            "fail_reason": f"low_conf:{conf:.1f}",
+            "ocr_ms": ocr_ms,
+            "rect": rect,
+            "tesseract_cmd": tesseract_cmd,
+        }
+    value = _parse_int(text)
+    if value is None:
+        return {
+            "value": None,
+            "fail_reason": "parse_failed",
+            "ocr_ms": ocr_ms,
+            "rect": rect,
+            "tesseract_cmd": tesseract_cmd,
+        }
+    return {
+        "value": value,
+        "fail_reason": None,
+        "ocr_ms": ocr_ms,
+        "rect": rect,
+        "tesseract_cmd": tesseract_cmd,
+    }
+
+
+def read_hud_gold(frame_bgr, regions=None, *, min_conf=45.0):
+    data = _read_hud_number(frame_bgr, key="gold", regions=regions, min_conf=min_conf)
+    return {
+        "gold": data["value"],
+        "fail_reason": data["fail_reason"],
+        "ocr_ms": data["ocr_ms"],
+        "rect": data["rect"],
+        "tesseract_cmd": data["tesseract_cmd"],
+    }
+
+
+def read_hud_lvl(frame_bgr, regions=None, *, min_conf=45.0):
+    data = _read_hud_number(frame_bgr, key="lvl", regions=regions, min_conf=min_conf)
+    return {
+        "lvl": data["value"],
+        "fail_reason": data["fail_reason"],
+        "ocr_ms": data["ocr_ms"],
+        "rect": data["rect"],
+        "tesseract_cmd": data["tesseract_cmd"],
+    }
+
+
+def read_hud_kills(frame_bgr, regions=None, *, min_conf=45.0):
+    data = _read_hud_number(frame_bgr, key="kills", regions=regions, min_conf=min_conf)
+    return {
+        "kills": data["value"],
+        "fail_reason": data["fail_reason"],
+        "ocr_ms": data["ocr_ms"],
+        "rect": data["rect"],
+        "tesseract_cmd": data["tesseract_cmd"],
+    }
+
+
 def read_hud_hp_ratio(frame_bgr, regions=None):
     if frame_bgr is None or frame_bgr.size == 0:
         return None, "frame_empty"
@@ -303,6 +429,9 @@ def read_hud_hp_ratio(frame_bgr, regions=None):
 def read_hud_telemetry(frame_bgr, regions=None):
     time_info = read_hud_time(frame_bgr)
     hp_ratio, hp_fail_reason = read_hud_hp_ratio(frame_bgr, regions=regions)
+    gold_info = read_hud_gold(frame_bgr, regions=regions)
+    lvl_info = read_hud_lvl(frame_bgr, regions=regions)
+    kills_info = read_hud_kills(frame_bgr, regions=regions)
     return {
         "time": time_info["time"],
         "time_fail_reason": time_info["fail_reason"],
@@ -311,6 +440,18 @@ def read_hud_telemetry(frame_bgr, regions=None):
         "tesseract_cmd": time_info["tesseract_cmd"],
         "hp_ratio": hp_ratio,
         "hp_fail_reason": hp_fail_reason,
+        "gold": gold_info["gold"],
+        "gold_fail_reason": gold_info["fail_reason"],
+        "gold_ocr_ms": gold_info["ocr_ms"],
+        "gold_rect": gold_info["rect"],
+        "lvl": lvl_info["lvl"],
+        "lvl_fail_reason": lvl_info["fail_reason"],
+        "lvl_ocr_ms": lvl_info["ocr_ms"],
+        "lvl_rect": lvl_info["rect"],
+        "kills": kills_info["kills"],
+        "kills_fail_reason": kills_info["fail_reason"],
+        "kills_ocr_ms": kills_info["ocr_ms"],
+        "kills_rect": kills_info["rect"],
     }
 
 
@@ -321,7 +462,7 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
     чтобы не удваивать количество вызовов Tesseract.
     """
     if frame_bgr is None or frame_bgr.size == 0:
-        return {"hp": None, "gold": None, "time": None}
+        return {"hp": None, "gold": None, "time": None, "lvl": None, "kills": None}
 
     pytesseract = _get_tesseract()
     if pytesseract is None:
@@ -329,13 +470,15 @@ def read_hud_values(frame_bgr, regions=None, min_conf=45.0):
             _warn_missing_tesseract()
         else:
             LOGGER.debug("pytesseract не найден — HUD OCR отключён")
-        return {"hp": None, "gold": None, "time": None}
+        return {"hp": None, "gold": None, "time": None, "lvl": None, "kills": None}
 
     results = {}
     for key, whitelist in (
         ("hp", "0123456789"),
         ("gold", "0123456789"),
         ("time", "0123456789:"),
+        ("lvl", "0123456789"),
+        ("kills", "0123456789"),
     ):
         x, y, w, h = _resolve_region(frame_bgr, regions, key)
         roi = frame_bgr[y : y + h, x : x + w]

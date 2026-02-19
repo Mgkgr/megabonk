@@ -1,0 +1,60 @@
+hotkeys:
+  enabled: true
+  toggle_vk: 119   # F8
+  panic_vk: 123    # F12
+
+runtime:
+  state: OFF
+  step_hz: 12
+  window_title: Megabonk
+  templates_dir: templates
+  overlay_enabled: true
+  overlay_window: "Megabonk Runtime Bot"
+  overlay_topmost: true
+  event_log_path: logs/runtime_events.jsonl
+  event_log_interval_s: 0.2
+  upgrade_space_cooldown_s: 0.3
+  cam_yaw_pixels: 160
+  restart_cooldown_s: 3.5
+  restart_hold_s: 3.5
+  restart_wait_timeout_s: 8.0
+  restart_max_attempts: 2
+
+detection:
+  grid_rows: 12
+  grid_cols: 20
+  enemy_hsv_lower: [45, 80, 40]
+  enemy_hsv_upper: [85, 255, 255]
+  enemy_min_area: 1200.0
+  interact_threshold: 0.65
+  use_onnx: false
+  onnx_model_path: ""
+  scene_memory_ttl_s: 2.0
+
+mvp_policy:
+  chest_policy: never_open
+  auto_pick_upgrade_with_space: true
+  user_picks_character_manually: true
+  allow_map_scan_tab: false
+  map_scan_interval_ticks: 180
+
+max_policy:
+  enabled: false
+  explore_with_tab: true
+  threat_scoring: true
+  bunny_hop_enabled: true
+  sliding_enabled: true
+  collect_shrines_and_statues: true
+
+item_priorities:
+  - blood_tome
+  - katana
+  - dexec
+
+boss_schedule:
+  - name: boss_1
+    spawn_s: 300
+    prep_s: 12
+  - name: boss_2
+    spawn_s: 600
+    prep_s: 12

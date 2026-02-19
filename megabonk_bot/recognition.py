@@ -137,8 +137,22 @@ def _friendly_name(raw: str) -> str:
         return "chest"
     if "coin" in lowered or "gold" in lowered:
         return "coin"
+    if "projectile" in lowered:
+        return "projectile"
     if "foliant" in lowered or "tome" in lowered or "book" in lowered:
         return "tome"
+    if "shrine" in lowered:
+        return "shrine"
+    if "statue" in lowered:
+        return "statue"
+    if "tree" in lowered:
+        return "tree"
+    if "rock" in lowered:
+        return "rock"
+    if "wall" in lowered:
+        return "wall"
+    if "boss" in lowered:
+        return "boss"
     if "altar" in lowered:
         return "altar"
     if "door" in lowered:
@@ -163,6 +177,8 @@ def analyze_scene(
         "tome",
         "katana",
         "dexec",
+        "shrine",
+        "statue",
     ),
     interact_threshold: float = 0.65,
 ) -> dict[str, list]:
@@ -182,6 +198,7 @@ def analyze_scene(
         "grid": grid,
         "enemies": enemies,
         "interactables": interactables,
+        "projectiles": [],
     }
 
 

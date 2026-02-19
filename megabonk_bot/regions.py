@@ -62,6 +62,18 @@ def build_regions(width, height):
             int(0.12 * width),
             int(0.05 * height),
         ),
+        "REG_HUD_LVL": (
+            int(0.74 * width),
+            int(0.08 * height),
+            int(0.10 * width),
+            int(0.05 * height),
+        ),
+        "REG_HUD_KILLS": (
+            int(0.63 * width),
+            int(0.08 * height),
+            int(0.10 * width),
+            int(0.05 * height),
+        ),
         "REG_HUD_TIME": (
             time_x0,
             time_y0,

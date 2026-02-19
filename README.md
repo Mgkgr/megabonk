@@ -4,6 +4,7 @@
 
 - `train.py` — запускает обучение PPO на среде `MegabonkEnv` и сохраняет модель в `megabonk_ppo_cnn`.
 - `play.py` — загружает обученную модель и выполняет инференс (игра «вживую»).
+- `run_runtime_bot.py` — запускает MVP runtime-бота (rule-based + CV) с hotkeys `F8/F12`.
 - `megabonk_env.py` — Gymnasium-окружение с захватом экрана, управлением через `pydirectinput` и наградами за «выживание».
 - `autopilot.py` — автопилот на шаблонах и простых эвристиках для меню/смерти/выбора персонажа и частично для движения в рантайме.
 
@@ -78,6 +79,27 @@ python train.py
 ```bash
 python play.py
 ```
+
+Runtime MVP (включение/отключение во время рана):
+
+```bash
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
+```
+
+По умолчанию:
+
+- `F8` — toggle `OFF/ACTIVE`.
+- `F12` — аварийный `PANIC` + `release_all_keys()`.
+- Логи событий: `logs/runtime_events.jsonl`.
+- На экране апгрейдов бот жмёт `Space` (рандомный автопик), сундуки в MVP не открывает.
+
+## Smoke-check перед запуском
+
+```bash
+scripts/smoke_check.sh
+```
+
+Базовый конфиг профиля находится в `config/bot_profile.yaml`.
 
 ## Реализованные функции
 
