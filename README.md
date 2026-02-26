@@ -7,7 +7,8 @@
 ## Что есть в репозитории
 
 - `run_runtime_bot.py` — основной runtime-бот (hotkeys, overlay, лог событий)
-- `config/bot_profile.yaml` — профиль runtime-бота
+- `megabonk_bot/config.py` — каноничные дефолты и валидация runtime-конфига
+- `config/bot_profile.yaml` — пользовательский override-профиль runtime-бота
 - `make_templates.py` — интерактивная нарезка шаблонов из `screen.png`
 - `train.py` — обучение PPO
 - `play.py` — запуск обученной PPO-модели
@@ -84,8 +85,23 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 - `--no-overlay` — без окна визуализации
 - `--no-hotkeys` — без WinAPI hotkeys
 - `--templates-dir <path>` — другая папка шаблонов
+- `--print-default-config` — вывести каноничный YAML дефолтов и выйти
 
 Логи runtime пишутся в `logs/runtime_events.jsonl`.
+
+## Конфигурация: единицы измерения и приоритеты
+
+- Источник правды для дефолтов: `megabonk_bot/config.py` (`DEFAULT_CONFIG`).
+- `config/bot_profile.yaml` и JSON-конфиг — только override поверх дефолтов.
+- Приоритет применения: `DEFAULT_CONFIG` -> YAML/JSON override -> CLI-флаги (`--window`, `--templates-dir`, `--no-overlay`, `--no-hotkeys`).
+- Для воспроизводимости можно получить эталонный YAML через `python run_runtime_bot.py --print-default-config`.
+
+Единицы измерения:
+- `_s` в названии поля (`event_log_interval_s`, `restart_*_s`, `scene_memory_ttl_s`) означает секунды.
+- `_ticks` (`map_scan_interval_ticks`) означает тики основного цикла.
+- `_pixels` (`cam_yaw_pixels`) означает пиксели мышиного смещения.
+- `step_hz` — частота цикла в герцах (итераций в секунду).
+- Пороги (`interact_threshold`) задаются в диапазоне `[0.0, 1.0]`.
 
 ## Что на что влияет (config/bot_profile.yaml)
 

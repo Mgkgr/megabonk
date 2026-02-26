@@ -10,122 +10,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import cv2
-import pydirectinput as di
+from megabonk_bot.config import DEFAULT_CONFIG, dump_default_config_yaml, load_config
 
-from autopilot import AutoPilot, HeuristicAutoPilot, is_death_like_frame
-from megabonk_bot.hud import read_hud_telemetry
-from megabonk_bot.max_model import (
-    BossWindow,
-    ObjectDetection,
-    OnnxObjectDetector,
-    SceneMemory360,
-    build_occupancy_cost_map,
-    pick_low_cost_direction,
-    score_enemy_threats,
-    should_enter_boss_prep,
-)
-from megabonk_bot.recognition import draw_recognition_overlay, analyze_scene
-from megabonk_bot.regions import build_regions
-from megabonk_bot.runtime_logic import BotMode, build_scene_snapshot, choose_mvp_action
-from megabonk_bot.runtime_state import RuntimeStateMachine
-from megabonk_bot.templates import load_templates
-from megabonk_bot.vision import find_in_region
-from window_capture import WindowCapture
-
-di.PAUSE = 0.0
-di.FAILSAFE = False
-
-
-def _deep_merge(base: dict, patch: dict) -> dict:
-    out = dict(base)
-    for key, value in patch.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
-
-
-def default_profile() -> dict[str, Any]:
-    return {
-        "hotkeys": {
-            "enabled": True,
-            "toggle_vk": 0x77,  # F8
-            "panic_vk": 0x7B,  # F12
-        },
-        "runtime": {
-            "state": "OFF",
-            "step_hz": 12,
-            "window_title": "Megabonk",
-            "templates_dir": "templates",
-            "overlay_enabled": True,
-            "overlay_window": "Megabonk Runtime Bot",
-            "overlay_topmost": True,
-            "event_log_path": "logs/runtime_events.jsonl",
-            "event_log_interval_s": 0.2,
-            "upgrade_space_cooldown_s": 0.3,
-            "cam_yaw_pixels": 160,
-            "restart_cooldown_s": 3.5,
-            "restart_hold_s": 3.5,
-            "restart_wait_timeout_s": 8.0,
-            "restart_max_attempts": 2,
-        },
-        "detection": {
-            "grid_rows": 12,
-            "grid_cols": 20,
-            "enemy_hsv_lower": [45, 80, 40],
-            "enemy_hsv_upper": [85, 255, 255],
-            "enemy_min_area": 1200.0,
-            "interact_threshold": 0.65,
-            "use_onnx": False,
-            "onnx_model_path": "",
-            "scene_memory_ttl_s": 2.0,
-        },
-        "mvp_policy": {
-            "chest_policy": "never_open",
-            "auto_pick_upgrade_with_space": True,
-            "user_picks_character_manually": True,
-            "allow_map_scan_tab": False,
-            "map_scan_interval_ticks": 180,
-        },
-        "max_policy": {
-            "enabled": False,
-            "explore_with_tab": True,
-            "threat_scoring": True,
-            "bunny_hop_enabled": True,
-            "sliding_enabled": True,
-            "collect_shrines_and_statues": True,
-        },
-        "item_priorities": [
-            "blood_tome",
-            "katana",
-        ],
-        "boss_schedule": [],
-    }
-
-
-def load_profile(config_path: Path | None) -> dict[str, Any]:
-    profile = default_profile()
-    if config_path is None:
-        return profile
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config not found: {config_path}")
-    raw = config_path.read_text(encoding="utf-8")
-    suffix = config_path.suffix.lower()
-    if suffix in {".yaml", ".yml"}:
-        try:
-            import yaml  # type: ignore
-        except Exception as exc:
-            raise RuntimeError(
-                "Для YAML-конфига нужен пакет pyyaml (`pip install pyyaml`)."
-            ) from exc
-        data = yaml.safe_load(raw) or {}
-    else:
-        data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("Config root must be object")
-    return _deep_merge(profile, data)
+cv2 = None
+di = None
 
 
 def key_on(key: str) -> None:
@@ -194,6 +82,8 @@ def apply_cam_yaw(yaw_id: int, cam_yaw_pixels: int) -> None:
 
 
 def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
+    from megabonk_bot.vision import find_in_region
+
     if frame_bgr is None or not templates or not regions:
         return False
     region = regions.get("REG_CHEST")
@@ -217,6 +107,8 @@ def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
 
 
 def _try_click_template(frame, templates, regions, tpl_name, region_name, threshold) -> bool:
+    from megabonk_bot.vision import find_in_region
+
     if tpl_name not in templates or region_name not in regions:
         return False
     found, (cx, cy), score = find_in_region(
@@ -317,7 +209,9 @@ def _serialize_detection_list(items) -> list[dict[str, Any]]:
     return output
 
 
-def _draw_runtime_overlay(frame, analysis, snapshot, *, mode: BotMode, action_reason: str):
+def _draw_runtime_overlay(frame, analysis, snapshot, *, mode, action_reason: str):
+    from megabonk_bot.recognition import draw_recognition_overlay
+
     canvas = draw_recognition_overlay(frame, analysis)
     h, _ = canvas.shape[:2]
     lines = [
@@ -344,7 +238,7 @@ def _draw_runtime_overlay(frame, analysis, snapshot, *, mode: BotMode, action_re
     return canvas
 
 
-def _parse_boss_schedule(raw_items: list[dict[str, Any]]) -> list[BossWindow]:
+def _parse_boss_schedule(raw_items: list[dict[str, Any]], boss_window_cls) -> list[Any]:
     windows = []
     for item in raw_items:
         if not isinstance(item, dict):
@@ -353,7 +247,7 @@ def _parse_boss_schedule(raw_items: list[dict[str, Any]]) -> list[BossWindow]:
         if spawn_s < 0:
             continue
         windows.append(
-            BossWindow(
+            boss_window_cls(
                 name=str(item.get("name", f"boss_{spawn_s}")),
                 spawn_s=spawn_s,
                 prep_s=int(item.get("prep_s", 10)),
@@ -363,7 +257,37 @@ def _parse_boss_schedule(raw_items: list[dict[str, Any]]) -> list[BossWindow]:
 
 
 def run(args) -> None:
-    config = load_profile(Path(args.config).resolve() if args.config else None)
+    global cv2
+    global di
+
+    import cv2 as _cv2
+    import pydirectinput as _di
+
+    from autopilot import AutoPilot, HeuristicAutoPilot, is_death_like_frame
+    from megabonk_bot.hud import read_hud_telemetry
+    from megabonk_bot.max_model import (
+        BossWindow,
+        ObjectDetection,
+        OnnxObjectDetector,
+        SceneMemory360,
+        build_occupancy_cost_map,
+        pick_low_cost_direction,
+        score_enemy_threats,
+        should_enter_boss_prep,
+    )
+    from megabonk_bot.recognition import analyze_scene
+    from megabonk_bot.regions import build_regions
+    from megabonk_bot.runtime_logic import BotMode, build_scene_snapshot, choose_mvp_action
+    from megabonk_bot.runtime_state import RuntimeStateMachine
+    from megabonk_bot.templates import load_templates
+    from window_capture import WindowCapture
+
+    cv2 = _cv2
+    di = _di
+    di.PAUSE = 0.0
+    di.FAILSAFE = False
+
+    config = load_config(Path(args.config).resolve() if args.config else None)
     runtime_cfg = config["runtime"]
     detect_cfg = config["detection"]
     mvp_cfg = config["mvp_policy"]
@@ -407,7 +331,7 @@ def run(args) -> None:
     if max_enabled and bool(detect_cfg.get("use_onnx")) and detect_cfg.get("onnx_model_path"):
         onnx_detector = OnnxObjectDetector(str(detect_cfg["onnx_model_path"]))
     scene_memory = SceneMemory360(ttl_s=float(detect_cfg.get("scene_memory_ttl_s", 2.0)))
-    boss_schedule = _parse_boss_schedule(config.get("boss_schedule", []))
+    boss_schedule = _parse_boss_schedule(config.get("boss_schedule", []), BossWindow)
 
     try:
         mode = BotMode(str(runtime_cfg.get("state", "OFF")).upper())
@@ -672,8 +596,19 @@ def parse_args():
     parser.add_argument("--templates-dir", default=None, help="Templates directory")
     parser.add_argument("--no-overlay", action="store_true", help="Disable overlay window")
     parser.add_argument("--no-hotkeys", action="store_true", help="Disable WinAPI hotkeys")
+    parser.add_argument(
+        "--print-default-config",
+        action="store_true",
+        help="Print default config in YAML and exit",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    run(parse_args())
+    args = parse_args()
+    if args.print_default_config:
+        if DEFAULT_CONFIG is None:
+            raise RuntimeError("DEFAULT_CONFIG is not initialized")
+        print(dump_default_config_yaml(), end="")
+    else:
+        run(args)
