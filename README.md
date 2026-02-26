@@ -89,6 +89,35 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 
 Логи runtime пишутся в `logs/runtime_events.jsonl`.
 
+## Логи: структура JSONL события
+
+События в `logs/runtime_events.jsonl` пишутся в формате JSONL (1 JSON-объект на строку).
+
+- `schema_version`: версия схемы события (`runtime_events_v1` для текущей схемы)
+- `ts`: UNIX timestamp (секунды)
+- `mode`, `frame_id`, `screen`: состояние runtime-цикла
+- `step_hz`, `dt_ms`: частота и шаг цикла (в миллисекундах)
+- `window_title`: заголовок окна, из которого идёт захват
+- `frame_size`: размер кадра (`width`, `height`)
+- `telemetry`: HUD-метрики (`time`, `gold`, `lvl`, `kills`, `hp_ratio`)
+- `latency_ms`: задержка итерации цикла
+
+Укороченный пример строки:
+
+```json
+{"schema_version":"runtime_events_v1","ts":1730000000.12,"mode":"ACTIVE","frame_id":128,"step_hz":12,"dt_ms":83.33,"window_title":"Megabonk","frame_size":{"width":1280,"height":720},"telemetry":{"time":95.3,"gold":420,"lvl":4,"kills":12,"hp_ratio":0.76},"latency_ms":21.5}
+```
+
+Для экспорта JSONL в CSV используйте [`scripts/export_jsonl.py`](scripts/export_jsonl.py):
+
+```bash
+python scripts/export_jsonl.py logs/runtime_events.jsonl
+python scripts/export_jsonl.py logs/runtime_events.jsonl --telemetry-only
+```
+
+Совместимость со старыми данными:
+- если в строке нет `schema_version`, экспортёр трактует её как `legacy`.
+
 ## Конфигурация: единицы измерения и приоритеты
 
 - Источник правды для дефолтов: `megabonk_bot/config.py` (`DEFAULT_CONFIG`).

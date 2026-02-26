@@ -8,12 +8,13 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from megabonk_bot.config import DEFAULT_CONFIG, dump_default_config_yaml, load_config
 
 cv2 = None
 di = None
+RUNTIME_EVENT_SCHEMA_VERSION = "runtime_events_v1"
 
 
 def key_on(key: str) -> None:
@@ -207,6 +208,75 @@ def _serialize_detection_list(items) -> list[dict[str, Any]]:
                 }
             )
     return output
+
+
+def build_runtime_event(
+    *,
+    ts: float,
+    mode,
+    frame_id: int,
+    screen: str,
+    snapshot,
+    hud_values: dict[str, Any],
+    action,
+    action_reason: str,
+    restart_event: Optional[str],
+    safe_sector: str,
+    boss_prep: bool,
+    boss_name: Optional[str],
+    preferred_direction: str,
+    threats,
+    loop_start: float,
+    step_hz: int,
+    dt: float,
+    window_title: str,
+    frame_width: int,
+    frame_height: int,
+    schema_version: str = RUNTIME_EVENT_SCHEMA_VERSION,
+) -> dict[str, Any]:
+    return {
+        "schema_version": schema_version,
+        "ts": ts,
+        "mode": mode.value,
+        "frame_id": int(frame_id),
+        "step_hz": int(step_hz),
+        "dt_ms": float(dt) * 1000.0,
+        "window_title": str(window_title),
+        "frame_size": {"width": int(frame_width), "height": int(frame_height)},
+        "screen": screen,
+        "telemetry": {
+            "time": getattr(snapshot, "time_s", None),
+            "hp_ratio": getattr(snapshot, "hp_ratio", None),
+            "lvl": getattr(snapshot, "lvl", None),
+            "kills": getattr(snapshot, "kills", None),
+            "gold": hud_values.get("gold"),
+        },
+        "detections": {
+            "enemies": _serialize_detection_list(getattr(snapshot, "enemies", [])),
+            "obstacles": _serialize_detection_list(getattr(snapshot, "obstacles", [])),
+            "projectiles": _serialize_detection_list(getattr(snapshot, "projectiles", [])),
+            "interactables": _serialize_detection_list(getattr(snapshot, "interactables", [])),
+        },
+        "action": asdict(action),
+        "reason": action_reason,
+        "restart": restart_event,
+        "safe_sector": safe_sector,
+        "is_dead": bool(getattr(snapshot, "is_dead", False)),
+        "is_upgrade": bool(getattr(snapshot, "is_upgrade", False)),
+        "boss_prep": bool(boss_prep),
+        "boss_name": boss_name,
+        "preferred_direction": preferred_direction,
+        "top_threats": [
+            {
+                "label": threat.label,
+                "rect": list(threat.rect),
+                "priority": threat.priority,
+                "distance_norm": threat.distance_norm,
+            }
+            for threat in threats[:3]
+        ],
+        "latency_ms": (time.perf_counter() - loop_start) * 1000.0,
+    }
 
 
 def _draw_runtime_overlay(frame, analysis, snapshot, *, mode, action_reason: str):
@@ -520,44 +590,28 @@ def run(args) -> None:
             now = time.time()
             if now - last_event_log_ts >= log_interval_s:
                 last_event_log_ts = now
-                event = {
-                    "ts": now,
-                    "mode": mode.value,
-                    "frame_id": frame_id,
-                    "screen": screen,
-                    "telemetry": {
-                        "time": snapshot.time_s,
-                        "hp_ratio": snapshot.hp_ratio,
-                        "lvl": snapshot.lvl,
-                        "kills": snapshot.kills,
-                        "gold": hud_values.get("gold"),
-                    },
-                    "detections": {
-                        "enemies": _serialize_detection_list(snapshot.enemies),
-                        "obstacles": _serialize_detection_list(snapshot.obstacles),
-                        "projectiles": _serialize_detection_list(snapshot.projectiles),
-                        "interactables": _serialize_detection_list(snapshot.interactables),
-                    },
-                    "action": asdict(action),
-                    "reason": action.reason,
-                    "restart": restart_event,
-                    "safe_sector": snapshot.safe_sector,
-                    "is_dead": snapshot.is_dead,
-                    "is_upgrade": snapshot.is_upgrade,
-                    "boss_prep": boss_prep,
-                    "boss_name": boss_name,
-                    "preferred_direction": preferred_direction,
-                    "top_threats": [
-                        {
-                            "label": threat.label,
-                            "rect": list(threat.rect),
-                            "priority": threat.priority,
-                            "distance_norm": threat.distance_norm,
-                        }
-                        for threat in threats[:3]
-                    ],
-                    "latency_ms": (time.perf_counter() - loop_start) * 1000.0,
-                }
+                event = build_runtime_event(
+                    ts=now,
+                    mode=mode,
+                    frame_id=frame_id,
+                    screen=screen,
+                    snapshot=snapshot,
+                    hud_values=hud_values,
+                    action=action,
+                    action_reason=action.reason,
+                    restart_event=restart_event,
+                    safe_sector=snapshot.safe_sector,
+                    boss_prep=boss_prep,
+                    boss_name=boss_name,
+                    preferred_direction=preferred_direction,
+                    threats=threats,
+                    loop_start=loop_start,
+                    step_hz=step_hz,
+                    dt=dt,
+                    window_title=window_title,
+                    frame_width=w,
+                    frame_height=h,
+                )
                 logger.log(event)
 
             if overlay_enabled:
