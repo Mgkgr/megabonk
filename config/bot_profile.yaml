@@ -47,6 +47,47 @@ max_policy:
   bunny_hop_enabled: true
   sliding_enabled: true
   collect_shrines_and_statues: true
+autopilot:
+  click_cooldown_s: 0.5
+  template_thresholds: {}
+  heuristic:
+    enemy_hsv_lower:
+    - 45
+    - 80
+    - 40
+    enemy_hsv_upper:
+    - 85
+    - 255
+    - 255
+    coin_hsv_lower:
+    - 18
+    - 120
+    - 80
+    coin_hsv_upper:
+    - 35
+    - 255
+    - 255
+    enemy_area_threshold: 1400.0
+    coin_area_threshold: 900.0
+    center_roi:
+    - 0.35
+    - 0.38
+    - 0.3
+    - 0.36
+    center_lower_roi:
+    - 0.35
+    - 0.55
+    - 0.3
+    - 0.35
+    stuck_diff_threshold: 3.0
+    stuck_frames_required: 6
+    stuck_escape_ticks: 16
+    jump_cooldown: 30
+    slide_cooldown: 24
+    enemy_close_multiplier: 1.6
+    scan_interval: 60
+    scan_duration: 8
+    scan_decision_ticks: 10
 item_priorities:
 - blood_tome
 - katana

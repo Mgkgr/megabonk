@@ -65,12 +65,41 @@ class MaxPolicyConfig:
 
 
 @dataclass(frozen=True)
+class HeuristicAutoPilotConfig:
+    enemy_hsv_lower: list[int] = field(default_factory=lambda: [45, 80, 40])
+    enemy_hsv_upper: list[int] = field(default_factory=lambda: [85, 255, 255])
+    coin_hsv_lower: list[int] = field(default_factory=lambda: [18, 120, 80])
+    coin_hsv_upper: list[int] = field(default_factory=lambda: [35, 255, 255])
+    enemy_area_threshold: float = 1400.0
+    coin_area_threshold: float = 900.0
+    center_roi: list[float] = field(default_factory=lambda: [0.35, 0.38, 0.30, 0.36])
+    center_lower_roi: list[float] = field(default_factory=lambda: [0.35, 0.55, 0.30, 0.35])
+    stuck_diff_threshold: float = 3.0
+    stuck_frames_required: int = 6
+    stuck_escape_ticks: int = 16
+    jump_cooldown: int = 30
+    slide_cooldown: int = 24
+    enemy_close_multiplier: float = 1.6
+    scan_interval: int = 60
+    scan_duration: int = 8
+    scan_decision_ticks: int = 10
+
+
+@dataclass(frozen=True)
+class AutoPilotConfig:
+    click_cooldown_s: float = 0.5
+    template_thresholds: dict[str, float] = field(default_factory=dict)
+    heuristic: HeuristicAutoPilotConfig = field(default_factory=HeuristicAutoPilotConfig)
+
+
+@dataclass(frozen=True)
 class BotConfig:
     hotkeys: HotkeysConfig = field(default_factory=HotkeysConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     mvp_policy: MvpPolicyConfig = field(default_factory=MvpPolicyConfig)
     max_policy: MaxPolicyConfig = field(default_factory=MaxPolicyConfig)
+    autopilot: AutoPilotConfig = field(default_factory=AutoPilotConfig)
     item_priorities: list[str] = field(default_factory=lambda: ["blood_tome", "katana"])
     boss_schedule: list[dict[str, Any]] = field(default_factory=list)
 
@@ -117,6 +146,16 @@ def _validate_hsv_triplet(name: str, value: Any) -> None:
             raise ValueError(f"{name}[{idx}] must be in [0, 255]")
 
 
+def _validate_float_quad(name: str, value: Any) -> None:
+    _must_be_type(name, value, list)
+    if len(value) != 4:
+        raise ValueError(f"{name} must contain exactly 4 items")
+    for idx, component in enumerate(value):
+        _must_be_type(f"{name}[{idx}]", component, (int, float))
+        if not 0.0 <= float(component) <= 1.0:
+            raise ValueError(f"{name}[{idx}] must be in [0.0, 1.0]")
+
+
 def _validate_config(data: dict[str, Any]) -> None:
     allowed_root = {
         "hotkeys",
@@ -124,6 +163,7 @@ def _validate_config(data: dict[str, Any]) -> None:
         "detection",
         "mvp_policy",
         "max_policy",
+        "autopilot",
         "item_priorities",
         "boss_schedule",
     }
@@ -135,6 +175,8 @@ def _validate_config(data: dict[str, Any]) -> None:
     detection = data["detection"]
     mvp_policy = data["mvp_policy"]
     hotkeys = data["hotkeys"]
+    autopilot = data["autopilot"]
+    heuristic = autopilot["heuristic"]
 
     _must_be_type("runtime.step_hz", runtime["step_hz"], int)
     _must_be_positive("runtime.step_hz", runtime["step_hz"])
@@ -173,6 +215,35 @@ def _validate_config(data: dict[str, Any]) -> None:
 
     _must_be_type("mvp_policy.map_scan_interval_ticks", mvp_policy["map_scan_interval_ticks"], int)
     _must_be_positive("mvp_policy.map_scan_interval_ticks", mvp_policy["map_scan_interval_ticks"])
+
+    _must_be_type("autopilot.click_cooldown_s", autopilot["click_cooldown_s"], (int, float))
+    _must_be_non_negative("autopilot.click_cooldown_s", float(autopilot["click_cooldown_s"]))
+    _must_be_type("autopilot.template_thresholds", autopilot["template_thresholds"], dict)
+    for key, value in autopilot["template_thresholds"].items():
+        _must_be_type(f"autopilot.template_thresholds.{key}", value, (int, float))
+        if not 0.0 <= float(value) <= 1.0:
+            raise ValueError(f"autopilot.template_thresholds.{key} must be in [0.0, 1.0]")
+
+    _validate_hsv_triplet("autopilot.heuristic.enemy_hsv_lower", heuristic["enemy_hsv_lower"])
+    _validate_hsv_triplet("autopilot.heuristic.enemy_hsv_upper", heuristic["enemy_hsv_upper"])
+    _validate_hsv_triplet("autopilot.heuristic.coin_hsv_lower", heuristic["coin_hsv_lower"])
+    _validate_hsv_triplet("autopilot.heuristic.coin_hsv_upper", heuristic["coin_hsv_upper"])
+    _validate_float_quad("autopilot.heuristic.center_roi", heuristic["center_roi"])
+    _validate_float_quad("autopilot.heuristic.center_lower_roi", heuristic["center_lower_roi"])
+    for name in ("enemy_area_threshold", "coin_area_threshold", "stuck_diff_threshold", "enemy_close_multiplier"):
+        _must_be_type(f"autopilot.heuristic.{name}", heuristic[name], (int, float))
+        _must_be_non_negative(f"autopilot.heuristic.{name}", float(heuristic[name]))
+    for name in (
+        "stuck_frames_required",
+        "stuck_escape_ticks",
+        "jump_cooldown",
+        "slide_cooldown",
+        "scan_interval",
+        "scan_duration",
+        "scan_decision_ticks",
+    ):
+        _must_be_type(f"autopilot.heuristic.{name}", heuristic[name], int)
+        _must_be_non_negative(f"autopilot.heuristic.{name}", heuristic[name])
 
     _must_be_type("hotkeys.toggle_vk", hotkeys["toggle_vk"], int)
     _must_be_type("hotkeys.panic_vk", hotkeys["panic_vk"], int)

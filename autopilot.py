@@ -50,6 +50,43 @@ REQUIRED_TEMPLATES = sorted(
     {tpl for scenario in AUTOPILOT_SCENARIOS.values() for tpl in scenario["templates"]}
 )
 
+DEFAULT_TEMPLATE_THRESHOLDS = {
+    "dead_hard": 0.55,
+    "dead_soft": 0.35,
+    "dead_confirm": 0.50,
+    "char_select_title": 0.60,
+    "main_play_detect": 0.60,
+    "unlocks_title": 0.60,
+    "chest_weapon_detect": 0.60,
+    "chest_foliant_detect": 0.60,
+    "running_lvl": 0.55,
+    "running_minimap": 0.55,
+    "main_play_click": 0.65,
+    "fox_face": 0.65,
+    "char_confirm": 0.70,
+    "chest_pick": 0.65,
+}
+
+DEFAULT_HEURISTIC_CONFIG = {
+    "enemy_hsv_lower": (45, 80, 40),
+    "enemy_hsv_upper": (85, 255, 255),
+    "coin_hsv_lower": (18, 120, 80),
+    "coin_hsv_upper": (35, 255, 255),
+    "enemy_area_threshold": 1400,
+    "coin_area_threshold": 900,
+    "center_roi": (0.35, 0.38, 0.30, 0.36),
+    "center_lower_roi": (0.35, 0.55, 0.30, 0.35),
+    "stuck_diff_threshold": 3.0,
+    "stuck_frames_required": 6,
+    "stuck_escape_ticks": 16,
+    "jump_cooldown": 30,
+    "slide_cooldown": 24,
+    "enemy_close_multiplier": 1.6,
+    "scan_interval": 60,
+    "scan_duration": 8,
+    "scan_decision_ticks": 10,
+}
+
 
 def click(x, y, delay=0.05):
     di.moveTo(x, y)
@@ -72,37 +109,45 @@ def is_death_like_frame(frame, mean_thr=35.0, std_thr=12.0):
 
 
 class AutoPilot:
-    def __init__(self, templates, regions):
+    def __init__(self, templates, regions, click_cooldown_s=0.5, template_thresholds=None):
         self.t = templates
         self.r = regions
         self.missing_templates = [tpl for tpl in REQUIRED_TEMPLATES if tpl not in templates]
         self.click_last_ts = 0.0
-        self.click_cooldown = 0.5
+        self.click_cooldown = float(click_cooldown_s)
+        self.template_thresholds = dict(DEFAULT_TEMPLATE_THRESHOLDS)
+        if template_thresholds:
+            self.template_thresholds.update(template_thresholds)
+
+    def _thr(self, key):
+        return float(self.template_thresholds.get(key, DEFAULT_TEMPLATE_THRESHOLDS[key]))
 
     def detect_screen(self, frame):
-        if self._seen(frame, "tpl_dead", "REG_DEAD", 0.55):
+        if self._seen(frame, "tpl_dead", "REG_DEAD", self._thr("dead_hard")):
             return "DEAD"
-        if self._seen(frame, "tpl_dead", "REG_DEAD", 0.35) and is_death_like_frame(frame):
+        if self._seen(frame, "tpl_dead", "REG_DEAD", self._thr("dead_soft")) and is_death_like_frame(
+            frame
+        ):
             return "DEAD"
-        if self._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", 0.50):
+        if self._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", self._thr("dead_confirm")):
             return "DEAD"
-        if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", 0.60):
+        if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", self._thr("char_select_title")):
             return "CHAR_SELECT"
-        if self._seen(frame, "tpl_play", "REG_MAIN_PLAY", 0.60):
+        if self._seen(frame, "tpl_play", "REG_MAIN_PLAY", self._thr("main_play_detect")):
             return "MAIN_MENU"
-        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", 0.60):
+        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", self._thr("unlocks_title")):
             return "UNLOCKS_WEAPONS"
-        if self._seen(frame, "tpl_katana", "REG_CHEST", 0.60) or self._seen(
-            frame, "tpl_dexec", "REG_CHEST", 0.60
+        if self._seen(frame, "tpl_katana", "REG_CHEST", self._thr("chest_weapon_detect")) or self._seen(
+            frame, "tpl_dexec", "REG_CHEST", self._thr("chest_weapon_detect")
         ):
             return "CHEST_WEAPON_PICK"
-        if self._seen(frame, "tpl_blood_tome", "REG_CHEST", 0.60) or self._seen(
-            frame, "tpl_foliant_bottom1", "REG_CHEST", 0.60
+        if self._seen(frame, "tpl_blood_tome", "REG_CHEST", self._thr("chest_foliant_detect")) or self._seen(
+            frame, "tpl_foliant_bottom1", "REG_CHEST", self._thr("chest_foliant_detect")
         ):
             return "CHEST_FOLIANT_PICK"
-        if self._seen(frame, "tpl_lvl", "REG_HUD", 0.55):
+        if self._seen(frame, "tpl_lvl", "REG_HUD", self._thr("running_lvl")):
             return "RUNNING"
-        if self._seen(frame, "tpl_minimap", "REG_MINIMAP", 0.55):
+        if self._seen(frame, "tpl_minimap", "REG_MINIMAP", self._thr("running_minimap")):
             return "RUNNING"
         return "UNKNOWN"
 
@@ -120,7 +165,7 @@ class AutoPilot:
         scr = self.detect_screen(frame)
 
         if scr == "MAIN_MENU":
-            thr = 0.65
+            thr = self._thr("main_play_click")
             found, (cx, cy), score = self._find(frame, "tpl_play", "REG_MAIN_PLAY", thr)
             if self.safe_click_if_found(found, (cx, cy), score, thr):
                 return True
@@ -136,12 +181,12 @@ class AutoPilot:
         return False
 
     def pick_fox_and_confirm(self, frame):
-        thr = 0.65
+        thr = self._thr("fox_face")
         found, (cx, cy), score = self._find(frame, "tpl_fox_face", "REG_CHAR_GRID", thr)
         if found and score >= thr and (time.time() - self.click_last_ts) >= self.click_cooldown:
             click(cx, cy, delay=0.08)
             self.click_last_ts = time.time()
-        thr2 = 0.70
+        thr2 = self._thr("char_confirm")
         found2, (cx2, cy2), score2 = self._find(frame, "tpl_confirm", "REG_CHAR_CONFIRM", thr2)
         if found2 and score2 >= thr2 and (time.time() - self.click_last_ts) >= self.click_cooldown:
             click(cx2, cy2, delay=0.2)
@@ -150,7 +195,7 @@ class AutoPilot:
         return False
 
     def handle_chest_weapon(self, frame):
-        thr = 0.65
+        thr = self._thr("chest_pick")
         ok, (cx, cy), score = self._find(frame, "tpl_katana", "REG_CHEST", thr)
         if self.safe_click_if_found(ok, (cx, cy), score, thr):
             return "picked_katana"
@@ -168,7 +213,7 @@ class AutoPilot:
             "tpl_foliant_bottom3",
             "tpl_blood_tome",
         ]:
-            thr = 0.65
+            thr = self._thr("chest_pick")
             ok, (cx, cy), score = self._find(frame, name, "REG_CHEST", thr)
             if self.safe_click_if_found(ok, (cx, cy), score, thr):
                 return f"picked_{name}"
@@ -239,24 +284,50 @@ class HeuristicAutoPilot:
         scan_interval=60,
         scan_duration=8,
         scan_decision_ticks=10,
+        config=None,
     ):
-        self.enemy_hsv_lower = np.array(enemy_hsv_lower, dtype=np.uint8)
-        self.enemy_hsv_upper = np.array(enemy_hsv_upper, dtype=np.uint8)
-        self.coin_hsv_lower = np.array(coin_hsv_lower, dtype=np.uint8)
-        self.coin_hsv_upper = np.array(coin_hsv_upper, dtype=np.uint8)
-        self.enemy_area_threshold = float(enemy_area_threshold)
-        self.coin_area_threshold = float(coin_area_threshold)
-        self.center_roi = center_roi
-        self.center_lower_roi = center_lower_roi
-        self.stuck_diff_threshold = float(stuck_diff_threshold)
-        self.stuck_frames_required = int(stuck_frames_required)
-        self.stuck_escape_ticks = int(stuck_escape_ticks)
-        self.jump_cooldown = int(jump_cooldown)
-        self.slide_cooldown = int(slide_cooldown)
-        self.enemy_close_multiplier = float(enemy_close_multiplier)
-        self.scan_interval = int(scan_interval)
-        self.scan_duration = int(scan_duration)
-        self.scan_decision_ticks = int(scan_decision_ticks)
+        cfg = dict(DEFAULT_HEURISTIC_CONFIG)
+        cfg.update(
+            {
+                "enemy_hsv_lower": enemy_hsv_lower,
+                "enemy_hsv_upper": enemy_hsv_upper,
+                "coin_hsv_lower": coin_hsv_lower,
+                "coin_hsv_upper": coin_hsv_upper,
+                "enemy_area_threshold": enemy_area_threshold,
+                "coin_area_threshold": coin_area_threshold,
+                "center_roi": center_roi,
+                "center_lower_roi": center_lower_roi,
+                "stuck_diff_threshold": stuck_diff_threshold,
+                "stuck_frames_required": stuck_frames_required,
+                "stuck_escape_ticks": stuck_escape_ticks,
+                "jump_cooldown": jump_cooldown,
+                "slide_cooldown": slide_cooldown,
+                "enemy_close_multiplier": enemy_close_multiplier,
+                "scan_interval": scan_interval,
+                "scan_duration": scan_duration,
+                "scan_decision_ticks": scan_decision_ticks,
+            }
+        )
+        if config:
+            cfg.update(config)
+
+        self.enemy_hsv_lower = np.array(cfg["enemy_hsv_lower"], dtype=np.uint8)
+        self.enemy_hsv_upper = np.array(cfg["enemy_hsv_upper"], dtype=np.uint8)
+        self.coin_hsv_lower = np.array(cfg["coin_hsv_lower"], dtype=np.uint8)
+        self.coin_hsv_upper = np.array(cfg["coin_hsv_upper"], dtype=np.uint8)
+        self.enemy_area_threshold = float(cfg["enemy_area_threshold"])
+        self.coin_area_threshold = float(cfg["coin_area_threshold"])
+        self.center_roi = tuple(cfg["center_roi"])
+        self.center_lower_roi = tuple(cfg["center_lower_roi"])
+        self.stuck_diff_threshold = float(cfg["stuck_diff_threshold"])
+        self.stuck_frames_required = int(cfg["stuck_frames_required"])
+        self.stuck_escape_ticks = int(cfg["stuck_escape_ticks"])
+        self.jump_cooldown = int(cfg["jump_cooldown"])
+        self.slide_cooldown = int(cfg["slide_cooldown"])
+        self.enemy_close_multiplier = float(cfg["enemy_close_multiplier"])
+        self.scan_interval = int(cfg["scan_interval"])
+        self.scan_duration = int(cfg["scan_duration"])
+        self.scan_decision_ticks = int(cfg["scan_decision_ticks"])
         self._scan_state = "idle"
         self._scan_timer = 0
         self._scan_interval_timer = 0

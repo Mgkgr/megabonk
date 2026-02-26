@@ -132,6 +132,33 @@ python scripts/export_jsonl.py logs/runtime_events.jsonl --telemetry-only
 - `step_hz` — частота цикла в герцах (итераций в секунду).
 - Пороги (`interact_threshold`) задаются в диапазоне `[0.0, 1.0]`.
 
+### Тюнинг `autopilot` (YAML)
+
+Пример секции:
+
+```yaml
+autopilot:
+  click_cooldown_s: 0.5
+  template_thresholds:
+    main_play_detect: 0.60
+    chest_pick: 0.65
+  heuristic:
+    stuck_frames_required: 6
+    jump_cooldown: 30
+    scan_interval: 60
+```
+
+Что значит:
+- `click_cooldown_s` — минимальная пауза между кликами (`seconds`).
+- `template_thresholds.*` — пороги template matching (`0.0..1.0`) для экранов/кнопок в `AutoPilot`.
+- `heuristic.*` — параметры `HeuristicAutoPilot`:
+  - `*_cooldown`, `stuck_escape_ticks`, `scan_interval`, `scan_duration`, `scan_decision_ticks`, `stuck_frames_required` задаются в `ticks` (итерациях цикла).
+  - `enemy_hsv_*`, `coin_hsv_*` — HSV-диапазоны (`0..255`).
+  - `enemy_area_threshold`, `coin_area_threshold` — площадь маски в пикселях.
+  - `center_roi`, `center_lower_roi` — ROI в относительных долях кадра `[x, y, w, h]` (`0.0..1.0`).
+  - `stuck_diff_threshold` — порог среднего diff по grayscale-кадрам.
+  - `enemy_close_multiplier` — множитель “очень близкой” угрозы для решения о слайде.
+
 ### Как калибровать ROI времени HUD
 
 - Базовый фиксированный ROI для времени: `HUD_TIME_RECT` в `megabonk_bot/hud.py`.
@@ -175,6 +202,11 @@ python scripts/export_jsonl.py logs/runtime_events.jsonl --telemetry-only
 ### `max_policy`
 - `enabled`: включение расширенной логики MAX
 - Остальные поля (`threat_scoring`, `bunny_hop_enabled`, и т.д.) включают отдельные подсистемы поведения
+
+### `autopilot`
+- `click_cooldown_s`: кулдаун клика для шаблонных действий `AutoPilot` (секунды)
+- `template_thresholds`: точечный тюнинг порогов распознавания экранов/кнопок
+- `heuristic`: параметры эвристического пилота (`UNSTUCK`, scan, jump/slide cooldown и пр.)
 
 ### `item_priorities`, `boss_schedule`
 - Приоритеты предметов и расписание подготовки к боссам для MAX-логики.

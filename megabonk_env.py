@@ -486,6 +486,7 @@ class MegabonkEnv(gym.Env):
         cam_pitch_pixels: int = 60,
         use_arrow_cam: bool = False,
         use_heuristic_autopilot: bool = False,
+        autopilot_config: dict | None = None,
         dead_r_cooldown: float = 3.5,
         restart_cooldown_s: float | None = None,
         restart_hold_s: float = 3.5,
@@ -552,6 +553,7 @@ class MegabonkEnv(gym.Env):
             print("[WARN] use_arrow_cam=True больше не поддерживается, используется движение мышью.")
             self.use_arrow_cam = False
         self.use_heuristic_autopilot = use_heuristic_autopilot
+        self.autopilot_config = dict(autopilot_config or {})
         if restart_cooldown_s is None:
             self.restart_cooldown_s = float(dead_r_cooldown)
         else:
@@ -584,10 +586,19 @@ class MegabonkEnv(gym.Env):
         self._death_tpl_names = _pick_death_templates(self.templates)
         self._confirm_tpl_names = _pick_confirm_templates(self.templates)
         self._running_tpl_names = _pick_running_templates(self.templates)
+        template_thresholds = self.autopilot_config.get("template_thresholds", {})
+        click_cooldown_s = self.autopilot_config.get("click_cooldown_s", 0.5)
         if templates_dir:
-            self.autopilot = AutoPilot(templates=self.templates, regions=self.regions)
+            self.autopilot = AutoPilot(
+                templates=self.templates,
+                regions=self.regions,
+                click_cooldown_s=click_cooldown_s,
+                template_thresholds=template_thresholds,
+            )
         if self.use_heuristic_autopilot:
-            self.heuristic_pilot = HeuristicAutoPilot()
+            self.heuristic_pilot = HeuristicAutoPilot(
+                config=self.autopilot_config.get("heuristic", {}),
+            )
 
         self.debug_recognition = bool(debug_recognition)
         self.debug_recognition_dir = Path(debug_recognition_dir)

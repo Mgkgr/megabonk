@@ -326,6 +326,17 @@ def _parse_boss_schedule(raw_items: list[dict[str, Any]], boss_window_cls) -> li
     return windows
 
 
+def _prepare_heuristic_config(
+    detect_cfg: dict[str, Any],
+    autopilot_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    heuristic_cfg = dict(autopilot_cfg.get("heuristic", {}))
+    heuristic_cfg.setdefault("enemy_hsv_lower", tuple(detect_cfg["enemy_hsv_lower"]))
+    heuristic_cfg.setdefault("enemy_hsv_upper", tuple(detect_cfg["enemy_hsv_upper"]))
+    heuristic_cfg.setdefault("enemy_area_threshold", float(detect_cfg["enemy_min_area"]))
+    return heuristic_cfg
+
+
 def run(args) -> None:
     global cv2
     global di
@@ -363,6 +374,7 @@ def run(args) -> None:
     mvp_cfg = config["mvp_policy"]
     max_cfg = config["max_policy"]
     hotkey_cfg = config["hotkeys"]
+    autopilot_cfg = config["autopilot"]
 
     step_hz = max(1, int(runtime_cfg["step_hz"]))
     dt = 1.0 / step_hz
@@ -383,11 +395,15 @@ def run(args) -> None:
     bbox = cap.get_bbox()
     regions = build_regions(bbox["width"], bbox["height"])
     templates = load_templates(templates_dir)
-    autopilot = AutoPilot(templates=templates, regions=regions)
+    autopilot = AutoPilot(
+        templates=templates,
+        regions=regions,
+        click_cooldown_s=float(autopilot_cfg.get("click_cooldown_s", 0.5)),
+        template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
+    )
+    heuristic_cfg = _prepare_heuristic_config(detect_cfg, autopilot_cfg)
     heuristic_pilot = HeuristicAutoPilot(
-        enemy_hsv_lower=tuple(detect_cfg["enemy_hsv_lower"]),
-        enemy_hsv_upper=tuple(detect_cfg["enemy_hsv_upper"]),
-        enemy_area_threshold=float(detect_cfg["enemy_min_area"]),
+        config=heuristic_cfg,
     )
     hotkeys = WinHotkeyPoller(
         enabled=bool(hotkey_cfg["enabled"]) and not args.no_hotkeys,
@@ -445,7 +461,12 @@ def run(args) -> None:
                 bbox["width"] = w
                 bbox["height"] = h
                 regions = build_regions(w, h)
-                autopilot = AutoPilot(templates=templates, regions=regions)
+                autopilot = AutoPilot(
+                    templates=templates,
+                    regions=regions,
+                    click_cooldown_s=float(autopilot_cfg.get("click_cooldown_s", 0.5)),
+                    template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
+                )
 
             screen = autopilot.detect_screen(frame)
             is_dead = screen == "DEAD" or (screen != "RUNNING" and is_death_like_frame(frame))
