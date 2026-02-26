@@ -202,28 +202,57 @@ def _parse_time(text):
     return int("".join(digits))
 
 
-def _resolve_time_roi(frame_bgr):
+def _resolve_time_rect(frame_bgr, regions=None):
     if frame_bgr is None or frame_bgr.size == 0:
         return None, "frame_empty"
+
+    candidates = []
+    if regions and "REG_HUD_TIME" in regions:
+        candidates.append(regions["REG_HUD_TIME"])
+    if HUD_TIME_RECT is not None:
+        candidates.append(HUD_TIME_RECT)
+    # Опциональный fallback на относительный ROI времени.
+    candidates.append(_resolve_region(frame_bgr, None, "time"))
+
     h, w = frame_bgr.shape[:2]
-    x, y, rw, rh = HUD_TIME_RECT
-    if w < x + rw or h < y + rh:
-        return None, f"frame_too_small:{w}x{h}"
+    first_rect = None
+    for rect in candidates:
+        if rect is None:
+            continue
+        x, y, rw, rh = rect
+        if first_rect is None:
+            first_rect = rect
+        if rw <= 0 or rh <= 0:
+            continue
+        if x < 0 or y < 0:
+            continue
+        if w >= x + rw and h >= y + rh:
+            return rect, None
+    if first_rect is None:
+        return None, "time_region_missing"
+    return first_rect, f"frame_too_small:{w}x{h}"
+
+
+def _resolve_time_roi(frame_bgr, regions=None):
+    rect, fail_reason = _resolve_time_rect(frame_bgr, regions=regions)
+    if rect is None:
+        return None, None, fail_reason
+    x, y, rw, rh = rect
     roi = frame_bgr[y : y + rh, x : x + rw]
     if roi.size == 0:
-        return None, "roi_empty"
-    return roi, None
+        return None, rect, "roi_empty"
+    return roi, rect, None
 
 
-def read_hud_time(frame_bgr, *, min_conf=45.0):
+def read_hud_time(frame_bgr, regions=None, *, min_conf=45.0):
     t0 = time.perf_counter()
-    roi, fail_reason = _resolve_time_roi(frame_bgr)
+    roi, rect, fail_reason = _resolve_time_roi(frame_bgr, regions=regions)
     if roi is None:
         return {
             "time": None,
             "fail_reason": fail_reason,
             "ocr_ms": 0.0,
-            "rect": HUD_TIME_RECT,
+            "rect": rect,
             "tesseract_cmd": None,
         }
 
@@ -237,7 +266,7 @@ def read_hud_time(frame_bgr, *, min_conf=45.0):
             "time": None,
             "fail_reason": "tesseract_missing",
             "ocr_ms": (time.perf_counter() - t0) * 1000.0,
-            "rect": HUD_TIME_RECT,
+            "rect": rect,
             "tesseract_cmd": None,
         }
 
@@ -249,7 +278,7 @@ def read_hud_time(frame_bgr, *, min_conf=45.0):
             "time": None,
             "fail_reason": "ocr_empty",
             "ocr_ms": ocr_ms,
-            "rect": HUD_TIME_RECT,
+            "rect": rect,
             "tesseract_cmd": tesseract_cmd,
         }
     time_val = _parse_time(text)
@@ -262,14 +291,14 @@ def read_hud_time(frame_bgr, *, min_conf=45.0):
             "time": None,
             "fail_reason": fail_reason,
             "ocr_ms": ocr_ms,
-            "rect": HUD_TIME_RECT,
+            "rect": rect,
             "tesseract_cmd": tesseract_cmd,
         }
     return {
         "time": time_val,
         "fail_reason": None,
         "ocr_ms": ocr_ms,
-        "rect": HUD_TIME_RECT,
+        "rect": rect,
         "tesseract_cmd": tesseract_cmd,
     }
 
@@ -427,7 +456,7 @@ def read_hud_hp_ratio(frame_bgr, regions=None):
 
 
 def read_hud_telemetry(frame_bgr, regions=None):
-    time_info = read_hud_time(frame_bgr)
+    time_info = read_hud_time(frame_bgr, regions=regions)
     hp_ratio, hp_fail_reason = read_hud_hp_ratio(frame_bgr, regions=regions)
     gold_info = read_hud_gold(frame_bgr, regions=regions)
     lvl_info = read_hud_lvl(frame_bgr, regions=regions)

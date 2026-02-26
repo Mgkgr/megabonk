@@ -103,6 +103,17 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 - `step_hz` — частота цикла в герцах (итераций в секунду).
 - Пороги (`interact_threshold`) задаются в диапазоне `[0.0, 1.0]`.
 
+### Как калибровать ROI времени HUD
+
+- Базовый фиксированный ROI для времени: `HUD_TIME_RECT` в `megabonk_bot/hud.py`.
+- Глобальный регион времени: `REG_HUD_TIME` в `megabonk_bot/regions.py`.
+- По умолчанию текущие координаты фиксированного бокса: `(28, 61, 127, 41)`.
+- Приоритет выбора ROI времени в рантайме:
+  1. `regions["REG_HUD_TIME"]`, если передан в вызовы HUD.
+  2. `HUD_TIME_RECT` из `megabonk_bot/hud.py`.
+  3. Относительный ROI `DEFAULT_HUD_REGIONS["time"]` из `megabonk_bot/hud.py` (fallback для маленьких/нестандартных кадров).
+- Практика калибровки: сначала обновите `REG_HUD_TIME` в `megabonk_bot/regions.py`, затем при необходимости скорректируйте `HUD_TIME_RECT` в `megabonk_bot/hud.py` и проверьте OCR через `read_hud_telemetry`.
+
 ## Что на что влияет (config/bot_profile.yaml)
 
 ### `runtime`
