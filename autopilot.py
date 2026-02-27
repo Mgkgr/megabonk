@@ -109,18 +109,29 @@ def is_death_like_frame(frame, mean_thr=35.0, std_thr=12.0):
 
 
 class AutoPilot:
-    def __init__(self, templates, regions, click_cooldown_s=0.5, template_thresholds=None):
+    def __init__(
+        self,
+        templates,
+        regions,
+        click_cooldown_s=0.5,
+        template_thresholds=None,
+        click_fn=None,
+    ):
         self.t = templates
         self.r = regions
         self.missing_templates = [tpl for tpl in REQUIRED_TEMPLATES if tpl not in templates]
         self.click_last_ts = 0.0
         self.click_cooldown = float(click_cooldown_s)
+        self.click_fn = click_fn or click
         self.template_thresholds = dict(DEFAULT_TEMPLATE_THRESHOLDS)
         if template_thresholds:
             self.template_thresholds.update(template_thresholds)
 
     def _thr(self, key):
         return float(self.template_thresholds.get(key, DEFAULT_TEMPLATE_THRESHOLDS[key]))
+
+    def _click(self, x, y, delay=0.05):
+        self.click_fn(int(x), int(y), delay)
 
     def detect_screen(self, frame):
         if self._seen(frame, "tpl_dead", "REG_DEAD", self._thr("dead_hard")):
@@ -157,7 +168,7 @@ class AutoPilot:
         now = time.time()
         if (now - self.click_last_ts) < self.click_cooldown:
             return False
-        click(*pos)
+        self._click(*pos)
         self.click_last_ts = now
         return True
 
@@ -184,12 +195,12 @@ class AutoPilot:
         thr = self._thr("fox_face")
         found, (cx, cy), score = self._find(frame, "tpl_fox_face", "REG_CHAR_GRID", thr)
         if found and score >= thr and (time.time() - self.click_last_ts) >= self.click_cooldown:
-            click(cx, cy, delay=0.08)
+            self._click(cx, cy, delay=0.08)
             self.click_last_ts = time.time()
         thr2 = self._thr("char_confirm")
         found2, (cx2, cy2), score2 = self._find(frame, "tpl_confirm", "REG_CHAR_CONFIRM", thr2)
         if found2 and score2 >= thr2 and (time.time() - self.click_last_ts) >= self.click_cooldown:
-            click(cx2, cy2, delay=0.2)
+            self._click(cx2, cy2, delay=0.2)
             self.click_last_ts = time.time()
             return True
         return False

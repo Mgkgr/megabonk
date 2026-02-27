@@ -48,11 +48,12 @@ pip install numpy opencv-python mss pydirectinput gymnasium stable-baselines3 to
 
 В runtime и RL используются:
 - `pydirectinput` для клавиатуры/мыши (DirectInput-совместимый ввод для DirectX-игр): [PyPI pydirectinput](https://pypi.org/project/PyDirectInput/)
-- `WindowCapture` на базе `mss` для захвата клиентской области окна: [python-mss docs](https://python-mss.readthedocs.io/)
+- `WindowCapture` с backend `PrintWindow` (по умолчанию, захват привязан к окну) и fallback на `mss`: [python-mss docs](https://python-mss.readthedocs.io/)
 
 Почему это важно:
-- задержка реакции почти всегда складывается из `capture (mss) + CV/логика + input (pydirectinput)`;
-- `mss` чувствителен к DPI/масштабированию Windows, поэтому несоответствие DPI даёт неверные ROI, «дрожащие» bbox и ложные лаги;
+- задержка реакции почти всегда складывается из `capture (PrintWindow/mss) + CV/логика + input (pydirectinput)`;
+- `mss` чувствителен к DPI/масштабированию Windows, поэтому при `runtime.capture_backend: mss` несоответствие DPI даёт неверные ROI, «дрожащие» bbox и ложные лаги;
+- `PrintWindow` позволяет читать кадр из окна даже если поверх экрана есть другие окна/оверлеи;
 - у `pydirectinput` ввод работает ближе к игровому DirectInput-пути, но это не отменяет ограничений по частоте цикла и системной нагрузке.
 
 Практические «числа производительности» для этого проекта:
@@ -106,6 +107,8 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 Полезные флаги:
 - `--no-overlay` — без окна визуализации
 - `--no-hotkeys` — без WinAPI hotkeys
+- `--capture-backend auto|printwindow|mss` — принудительный backend захвата окна
+- `--window-focus-interval-s <seconds>` — период принудительного возврата фокуса окну игры
 - `--templates-dir <path>` — другая папка шаблонов
 - `--print-default-config` — вывести каноничный YAML дефолтов и выйти
 
@@ -199,6 +202,8 @@ autopilot:
 - `state`: стартовое состояние (`OFF`, `ACTIVE`, `PANIC`)
 - `step_hz`: частота цикла бота; выше = быстрее реакция и выше нагрузка CPU
 - `window_title`: какое окно захватывать
+- `capture_backend`: backend захвата окна (`auto`, `printwindow`, `mss`)
+- `window_focus_interval_s`: как часто принудительно проверять/возвращать фокус окна Megabonk
 - `templates_dir`: откуда грузить шаблоны
 - `overlay_enabled`, `overlay_window`, `overlay_topmost`: поведение overlay
 - `event_log_path`, `event_log_interval_s`: путь и частота записи JSONL-логов

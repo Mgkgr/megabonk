@@ -8,6 +8,7 @@ import numpy as np
 
 
 user32 = ctypes.windll.user32
+gdi32 = ctypes.windll.gdi32
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -27,8 +28,34 @@ class POINT(ctypes.Structure):
     ]
 
 
+class BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", wintypes.DWORD),
+        ("biWidth", wintypes.LONG),
+        ("biHeight", wintypes.LONG),
+        ("biPlanes", wintypes.WORD),
+        ("biBitCount", wintypes.WORD),
+        ("biCompression", wintypes.DWORD),
+        ("biSizeImage", wintypes.DWORD),
+        ("biXPelsPerMeter", wintypes.LONG),
+        ("biYPelsPerMeter", wintypes.LONG),
+        ("biClrUsed", wintypes.DWORD),
+        ("biClrImportant", wintypes.DWORD),
+    ]
+
+
+class BITMAPINFO(ctypes.Structure):
+    _fields_ = [
+        ("bmiHeader", BITMAPINFOHEADER),
+        ("bmiColors", wintypes.DWORD * 3),
+    ]
+
+
 user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
 user32.EnumWindows.restype = wintypes.BOOL
+
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.IsWindow.restype = wintypes.BOOL
 
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsWindowVisible.restype = wintypes.BOOL
@@ -51,6 +78,9 @@ user32.ShowWindow.restype = wintypes.BOOL
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.SetForegroundWindow.restype = wintypes.BOOL
 
+user32.GetForegroundWindow.argtypes = []
+user32.GetForegroundWindow.restype = wintypes.HWND
+
 user32.SetWindowPos.argtypes = [
     wintypes.HWND,
     wintypes.HWND,
@@ -62,6 +92,41 @@ user32.SetWindowPos.argtypes = [
 ]
 user32.SetWindowPos.restype = wintypes.BOOL
 
+user32.GetDC.argtypes = [wintypes.HWND]
+user32.GetDC.restype = wintypes.HDC
+
+user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+user32.ReleaseDC.restype = ctypes.c_int
+
+user32.PrintWindow.argtypes = [wintypes.HWND, wintypes.HDC, wintypes.UINT]
+user32.PrintWindow.restype = wintypes.BOOL
+
+gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+gdi32.CreateCompatibleDC.restype = wintypes.HDC
+
+gdi32.DeleteDC.argtypes = [wintypes.HDC]
+gdi32.DeleteDC.restype = wintypes.BOOL
+
+gdi32.CreateCompatibleBitmap.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+gdi32.CreateCompatibleBitmap.restype = wintypes.HANDLE
+
+gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HANDLE]
+gdi32.SelectObject.restype = wintypes.HANDLE
+
+gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
+gdi32.DeleteObject.restype = wintypes.BOOL
+
+gdi32.GetDIBits.argtypes = [
+    wintypes.HDC,
+    wintypes.HANDLE,
+    wintypes.UINT,
+    wintypes.UINT,
+    ctypes.c_void_p,
+    ctypes.POINTER(BITMAPINFO),
+    wintypes.UINT,
+]
+gdi32.GetDIBits.restype = ctypes.c_int
+
 
 SW_RESTORE = 9
 HWND_TOPMOST = -1
@@ -69,6 +134,81 @@ HWND_NOTOPMOST = -2
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_SHOWWINDOW = 0x0040
+PW_CLIENTONLY = 0x00000001
+PW_RENDERFULLCONTENT = 0x00000002
+BI_RGB = 0
+DIB_RGB_COLORS = 0
+
+
+def _coerce_capture_backend(value: str) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized not in {"auto", "printwindow", "mss"}:
+        raise ValueError(
+            f"Unsupported capture backend: {value!r}. Expected auto|printwindow|mss."
+        )
+    return normalized
+
+
+def _grab_with_printwindow(hwnd: int, width: int, height: int):
+    if width <= 0 or height <= 0:
+        return None
+
+    hdc_window = None
+    hdc_mem = None
+    hbmp = None
+    old_obj = None
+    try:
+        hdc_window = user32.GetDC(hwnd)
+        if not hdc_window:
+            return None
+        hdc_mem = gdi32.CreateCompatibleDC(hdc_window)
+        if not hdc_mem:
+            return None
+        hbmp = gdi32.CreateCompatibleBitmap(hdc_window, width, height)
+        if not hbmp:
+            return None
+        old_obj = gdi32.SelectObject(hdc_mem, hbmp)
+        if not old_obj:
+            return None
+
+        flags = PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        ok = bool(user32.PrintWindow(hwnd, hdc_mem, flags))
+        if not ok:
+            ok = bool(user32.PrintWindow(hwnd, hdc_mem, PW_CLIENTONLY))
+        if not ok:
+            return None
+
+        bmi = BITMAPINFO()
+        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.bmiHeader.biWidth = width
+        # Negative height = top-down bitmap, so no vertical flip is required.
+        bmi.bmiHeader.biHeight = -height
+        bmi.bmiHeader.biPlanes = 1
+        bmi.bmiHeader.biBitCount = 32
+        bmi.bmiHeader.biCompression = BI_RGB
+        buf = (ctypes.c_ubyte * (width * height * 4))()
+        lines = gdi32.GetDIBits(
+            hdc_mem,
+            hbmp,
+            0,
+            height,
+            ctypes.cast(buf, ctypes.c_void_p),
+            ctypes.byref(bmi),
+            DIB_RGB_COLORS,
+        )
+        if lines != height:
+            return None
+        bgra = np.ctypeslib.as_array(buf).reshape((height, width, 4))
+        return bgra[:, :, :3].copy()
+    finally:
+        if hdc_mem and old_obj:
+            gdi32.SelectObject(hdc_mem, old_obj)
+        if hbmp:
+            gdi32.DeleteObject(hbmp)
+        if hdc_mem:
+            gdi32.DeleteDC(hdc_mem)
+        if hdc_window:
+            user32.ReleaseDC(hwnd, hdc_window)
 
 
 def find_hwnd_by_title_substr(title_substr: str) -> int | None:
@@ -131,20 +271,38 @@ class WindowCapture:
     window_title: str
     hwnd: int
     sct: mss.mss
+    capture_backend: str = "auto"
     _last_grab_ts: float = 0.0
     _last_grab_hz: float = 0.0
     _bad_grab_count: int = 0
+    _last_focus_ts: float = 0.0
 
     @classmethod
-    def create(cls, window_title: str = "MEGABONK"):
+    def create(cls, window_title: str = "MEGABONK", capture_backend: str = "auto"):
         hwnd = find_hwnd_by_title_substr(window_title)
         if not hwnd:
             raise RuntimeError(
                 f"Window not found by title substring: {window_title!r}"
             )
-        return cls(window_title=window_title, hwnd=hwnd, sct=mss.mss())
+        return cls(
+            window_title=window_title,
+            hwnd=hwnd,
+            sct=mss.mss(),
+            capture_backend=_coerce_capture_backend(capture_backend),
+        )
+
+    def _refresh_hwnd(self):
+        if self.hwnd and bool(user32.IsWindow(self.hwnd)):
+            return
+        hwnd = find_hwnd_by_title_substr(self.window_title)
+        if not hwnd:
+            raise RuntimeError(
+                f"Window not found by title substring: {self.window_title!r}"
+            )
+        self.hwnd = hwnd
 
     def focus(self, topmost: bool = True):
+        self._refresh_hwnd()
         user32.ShowWindow(self.hwnd, SW_RESTORE)
         user32.SetWindowPos(
             self.hwnd,
@@ -156,9 +314,29 @@ class WindowCapture:
             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
         )
         user32.SetForegroundWindow(self.hwnd)
+        self._last_focus_ts = time.time()
+
+    def focus_if_needed(self, topmost: bool = False, min_interval_s: float = 0.25):
+        now = time.time()
+        if (now - self._last_focus_ts) < max(0.0, float(min_interval_s)):
+            return
+        self._refresh_hwnd()
+        if user32.GetForegroundWindow() != self.hwnd:
+            self.focus(topmost=topmost)
 
     def get_bbox(self) -> dict:
+        self._refresh_hwnd()
         return get_client_bbox_on_screen(self.hwnd)
+
+    def client_to_screen(self, x: int, y: int, bbox: dict | None = None):
+        box = bbox or self.get_bbox()
+        return int(box["left"]) + int(x), int(box["top"]) + int(y)
+
+    def _grab_with_mss(self, bbox: dict):
+        img = np.array(self.sct.grab(bbox), dtype=np.uint8)
+        if img.size == 0:
+            raise ValueError("Empty frame grab")
+        return img[:, :, :3]
 
     def grab(self):
         bbox = self.get_bbox()
@@ -176,10 +354,13 @@ class WindowCapture:
 
         for attempt in range(attempts):
             try:
-                img = np.array(self.sct.grab(bbox), dtype=np.uint8)
-                if img.size == 0:
-                    raise ValueError("Empty frame grab")
-                frame = img[:, :, :3]
+                frame = None
+                if self.capture_backend in {"auto", "printwindow"}:
+                    frame = _grab_with_printwindow(self.hwnd, expected_w, expected_h)
+                if frame is None and self.capture_backend in {"auto", "mss"}:
+                    frame = self._grab_with_mss(bbox)
+                if frame is None:
+                    raise ValueError("Capture backend returned empty frame")
                 if frame.shape[0] != expected_h or frame.shape[1] != expected_w:
                     raise ValueError(
                         f"Unexpected frame size: {frame.shape} "
@@ -188,7 +369,7 @@ class WindowCapture:
                 return frame
             except Exception:
                 self._bad_grab_count += 1
-                self.focus(topmost=True)
+                self.focus_if_needed(topmost=False, min_interval_s=0.05)
                 time.sleep(base_backoff_s * (2 ** attempt))
                 bbox = self.get_bbox()
                 expected_h = int(bbox["height"])

@@ -18,6 +18,8 @@ class RuntimeConfig:
     state: str = "OFF"
     step_hz: int = 12
     window_title: str = "Megabonk"
+    capture_backend: str = "auto"
+    window_focus_interval_s: float = 0.25
     templates_dir: str = "templates"
     overlay_enabled: bool = True
     overlay_window: str = "Megabonk Runtime Bot"
@@ -187,6 +189,7 @@ def _validate_config(data: dict[str, Any]) -> None:
 
     for seconds_key in (
         "event_log_interval_s",
+        "window_focus_interval_s",
         "upgrade_space_cooldown_s",
         "restart_cooldown_s",
         "restart_hold_s",
@@ -198,6 +201,9 @@ def _validate_config(data: dict[str, Any]) -> None:
     _must_be_type("runtime.state", runtime["state"], str)
     if runtime["state"].upper() not in {"OFF", "ACTIVE", "PANIC", "RECOVERY"}:
         raise ValueError("runtime.state must be one of OFF|ACTIVE|PANIC|RECOVERY")
+    _must_be_type("runtime.capture_backend", runtime["capture_backend"], str)
+    if str(runtime["capture_backend"]).lower() not in {"auto", "printwindow", "mss"}:
+        raise ValueError("runtime.capture_backend must be one of auto|printwindow|mss")
 
     _must_be_type("detection.grid_rows", detection["grid_rows"], int)
     _must_be_positive("detection.grid_rows", detection["grid_rows"])

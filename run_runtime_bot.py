@@ -107,7 +107,28 @@ def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
     return False
 
 
-def _try_click_template(frame, templates, regions, tpl_name, region_name, threshold) -> bool:
+def _make_window_click(cap, *, focus_interval_s: float):
+    def _click(client_x: int, client_y: int, delay: float = 0.0) -> None:
+        cap.focus_if_needed(topmost=False, min_interval_s=focus_interval_s)
+        bbox = cap.get_bbox()
+        x, y = cap.client_to_screen(int(client_x), int(client_y), bbox=bbox)
+        di.moveTo(x, y)
+        di.click()
+        if delay > 0:
+            time.sleep(delay)
+
+    return _click
+
+
+def _try_click_template(
+    frame,
+    templates,
+    regions,
+    tpl_name,
+    region_name,
+    threshold,
+    click_fn=None,
+) -> bool:
     from megabonk_bot.vision import find_in_region
 
     if tpl_name not in templates or region_name not in regions:
@@ -120,8 +141,11 @@ def _try_click_template(frame, templates, regions, tpl_name, region_name, thresh
     )
     if not found:
         return False
-    di.moveTo(cx, cy)
-    di.click()
+    if click_fn is not None:
+        click_fn(cx, cy, 0.0)
+    else:
+        di.moveTo(cx, cy)
+        di.click()
     return score >= threshold
 
 
@@ -405,9 +429,15 @@ def run(args) -> None:
     overlay_window = str(runtime_cfg["overlay_window"])
     window_title = str(args.window or runtime_cfg["window_title"])
     templates_dir = str(args.templates_dir or runtime_cfg["templates_dir"])
+    capture_backend = str(args.capture_backend or runtime_cfg.get("capture_backend", "auto"))
+    if args.window_focus_interval_s is None:
+        window_focus_interval_s = float(runtime_cfg.get("window_focus_interval_s", 0.25))
+    else:
+        window_focus_interval_s = float(args.window_focus_interval_s)
 
-    cap = WindowCapture.create(window_title)
+    cap = WindowCapture.create(window_title, capture_backend=capture_backend)
     cap.focus(topmost=True)
+    window_click = _make_window_click(cap, focus_interval_s=window_focus_interval_s)
     bbox = cap.get_bbox()
     regions = build_regions(bbox["width"], bbox["height"])
     templates = load_templates(templates_dir)
@@ -416,6 +446,7 @@ def run(args) -> None:
         regions=regions,
         click_cooldown_s=float(autopilot_cfg.get("click_cooldown_s", 0.5)),
         template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
+        click_fn=window_click,
     )
     heuristic_cfg = _prepare_heuristic_config(detect_cfg, autopilot_cfg)
     heuristic_pilot = HeuristicAutoPilot(
@@ -482,6 +513,7 @@ def run(args) -> None:
                     regions=regions,
                     click_cooldown_s=float(autopilot_cfg.get("click_cooldown_s", 0.5)),
                     template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
+                    click_fn=window_click,
                 )
 
             screen = autopilot.detect_screen(frame)
@@ -546,6 +578,12 @@ def run(args) -> None:
                 map_scan_now=map_scan_now,
             )
 
+            if mode in {BotMode.ACTIVE, BotMode.RECOVERY}:
+                cap.focus_if_needed(
+                    topmost=False,
+                    min_interval_s=window_focus_interval_s,
+                )
+
             restart_event = None
             if mode == BotMode.RECOVERY:
                 set_move(0)
@@ -568,8 +606,24 @@ def run(args) -> None:
                         restart_event = f"hold_r_attempt_{recovery_attempts}"
                     if (now - recovery_started_ts) >= restart_wait_timeout_s:
                         clicked = (
-                            _try_click_template(frame, templates, regions, "tpl_confirm", "REG_DEAD_CONFIRM", 0.6)
-                            or _try_click_template(frame, templates, regions, "tpl_play", "REG_MAIN_PLAY", 0.65)
+                            _try_click_template(
+                                frame,
+                                templates,
+                                regions,
+                                "tpl_confirm",
+                                "REG_DEAD_CONFIRM",
+                                0.6,
+                                click_fn=window_click,
+                            )
+                            or _try_click_template(
+                                frame,
+                                templates,
+                                regions,
+                                "tpl_play",
+                                "REG_MAIN_PLAY",
+                                0.65,
+                                click_fn=window_click,
+                            )
                         )
                         if clicked:
                             restart_event = "fallback_click_menu"
@@ -683,6 +737,18 @@ def parse_args():
         description="Runtime bot (MVP): F8 toggle, F12 panic, JSONL + overlay.",
     )
     parser.add_argument("--window", default=None, help="Window title substring")
+    parser.add_argument(
+        "--capture-backend",
+        choices=("auto", "printwindow", "mss"),
+        default=None,
+        help="Capture backend for the game window",
+    )
+    parser.add_argument(
+        "--window-focus-interval-s",
+        type=float,
+        default=None,
+        help="How often to enforce focus on the target window",
+    )
     parser.add_argument("--config", default="config/bot_profile.yaml", help="Path to YAML/JSON config")
     parser.add_argument("--templates-dir", default=None, help="Templates directory")
     parser.add_argument("--no-overlay", action="store_true", help="Disable overlay window")

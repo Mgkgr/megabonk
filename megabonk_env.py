@@ -496,6 +496,8 @@ class MegabonkEnv(gym.Env):
         templates_dir: str | None = "templates",
         regions_builder=build_regions,
         window_title: str | None = None,
+        capture_backend: str = "auto",
+        window_focus_interval_s: float = 0.25,
         cap: WindowCapture | None = None,
         debug_recognition: bool = False,
         debug_recognition_dir: str = "dbg",
@@ -527,9 +529,10 @@ class MegabonkEnv(gym.Env):
         super().__init__()
         self.cap = cap
         if self.cap is None and window_title:
-            self.cap = WindowCapture.create(window_title)
+            self.cap = WindowCapture.create(window_title, capture_backend=capture_backend)
         if self.cap is not None:
             self.cap.focus(topmost=True)
+        self.window_focus_interval_s = max(0.0, float(window_focus_interval_s))
 
         if self.cap is not None:
             self.region = self.cap.get_bbox()
@@ -594,6 +597,7 @@ class MegabonkEnv(gym.Env):
                 regions=self.regions,
                 click_cooldown_s=click_cooldown_s,
                 template_thresholds=template_thresholds,
+                click_fn=self._window_click,
             )
         if self.use_heuristic_autopilot:
             self.heuristic_pilot = HeuristicAutoPilot(
@@ -897,6 +901,35 @@ class MegabonkEnv(gym.Env):
         if dy != 0:
             di.moveRel(0, dy, duration=0)
 
+    def _focus_game_window(self, *, topmost: bool = False, force: bool = False):
+        if self.cap is None:
+            return
+        if force or not hasattr(self.cap, "focus_if_needed"):
+            self.cap.focus(topmost=topmost)
+            return
+        self.cap.focus_if_needed(
+            topmost=topmost,
+            min_interval_s=self.window_focus_interval_s,
+        )
+
+    def _window_click(self, x: int, y: int, delay: float = 0.05):
+        if self.cap is None:
+            di.moveTo(int(x), int(y))
+            di.click()
+            time.sleep(delay)
+            return
+        self._focus_game_window()
+        if not hasattr(self.cap, "client_to_screen"):
+            di.moveTo(int(x), int(y))
+            di.click()
+            time.sleep(delay)
+            return
+        bbox = self.cap.get_bbox()
+        sx, sy = self.cap.client_to_screen(int(x), int(y), bbox=bbox)
+        di.moveTo(sx, sy)
+        di.click()
+        time.sleep(delay)
+
     def _grab_frame(self):
         frame = None
         if self.cap is not None:
@@ -1045,6 +1078,7 @@ class MegabonkEnv(gym.Env):
         return obs.astype(np.uint8)
 
     def _do_reset_sequence(self):
+        self._focus_game_window(force=True)
         # отпустить движение на всякий
         set_move(0)
         key_off(self.jump_key)
@@ -1231,6 +1265,7 @@ class MegabonkEnv(gym.Env):
         self._safety_step_count += 1
 
         input_start = time.perf_counter()
+        self._focus_game_window()
         self._apply_cam_yaw(yaw)
         self._apply_cam_pitch(pitch)
         if self._sticky_left <= 0:
@@ -1420,6 +1455,7 @@ class MegabonkEnv(gym.Env):
             reason=reason,
             death_streak=death_streak,
         )
+        self._focus_game_window(force=True)
         hold("r", dt=self.restart_hold_s)
         self._last_dead_r_time = time.time()
         if not self._wait_for_running(self.restart_wait_timeout_s):

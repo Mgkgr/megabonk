@@ -20,6 +20,22 @@ def test_autopilot_accepts_click_cooldown_and_threshold_overrides():
     assert pilot._thr("main_play_detect") == 0.73
 
 
+def test_autopilot_supports_custom_click_handler():
+    clicks = []
+
+    def _click(x, y, delay):
+        clicks.append((x, y, delay))
+
+    pilot = AutoPilot(
+        templates={},
+        regions={},
+        click_fn=_click,
+    )
+    ok = pilot.safe_click_if_found(True, (10, 20), score=0.9, thr=0.5)
+    assert ok is True
+    assert clicks == [(10, 20, 0.05)]
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

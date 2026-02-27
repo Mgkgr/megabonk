@@ -6,6 +6,8 @@ runtime:
   state: "OFF"
   step_hz: 12
   window_title: Megabonk
+  capture_backend: auto
+  window_focus_interval_s: 0.25
   templates_dir: templates
   overlay_enabled: true
   overlay_window: Megabonk Runtime Bot
