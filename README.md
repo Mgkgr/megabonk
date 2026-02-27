@@ -44,6 +44,28 @@ pip install numpy opencv-python mss pydirectinput gymnasium stable-baselines3 to
 - OCR HUD: `pip install pytesseract` + установленный Tesseract OCR
 - ONNX-детектор (`detection.use_onnx: true`): `pip install onnxruntime`
 
+## Runtime-зависимости и производительность (важно)
+
+В runtime и RL используются:
+- `pydirectinput` для клавиатуры/мыши (DirectInput-совместимый ввод для DirectX-игр): [PyPI pydirectinput](https://pypi.org/project/PyDirectInput/)
+- `WindowCapture` на базе `mss` для захвата клиентской области окна: [python-mss docs](https://python-mss.readthedocs.io/)
+
+Почему это важно:
+- задержка реакции почти всегда складывается из `capture (mss) + CV/логика + input (pydirectinput)`;
+- `mss` чувствителен к DPI/масштабированию Windows, поэтому несоответствие DPI даёт неверные ROI, «дрожащие» bbox и ложные лаги;
+- у `pydirectinput` ввод работает ближе к игровому DirectInput-пути, но это не отменяет ограничений по частоте цикла и системной нагрузке.
+
+Практические «числа производительности» для этого проекта:
+- дефолт `runtime.step_hz = 12` -> целевой шаг `dt_ms ~= 83.3`;
+- `runtime.event_log_interval_s = 0.2` -> запись агрегированных runtime-событий каждые 200 мс;
+- если в `logs/runtime_events.jsonl` стабильно `latency_ms > dt_ms`, цикл перегружен (бот не успевает за своей частотой);
+- рабочий ориентир для стабильного runtime: `p95(latency_ms) < dt_ms`, лучше с запасом 20-30%.
+
+Мини-чек при симптомах лагов:
+1. Проверить масштаб Windows (`Display Scale`) и запускать с одинаковым DPI, на котором снимались шаблоны.
+2. Снизить `runtime.step_hz` (например, `12 -> 10 -> 8`) и сравнить `p95 latency_ms`.
+3. Переснять `screen.png` и шаблоны на текущем разрешении/масштабе.
+
 ## Что подготовить перед первым запуском
 
 1. Запустить игру и убедиться, что окно определяется по `window_title`.
