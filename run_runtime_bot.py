@@ -210,6 +210,21 @@ def _serialize_detection_list(items) -> list[dict[str, Any]]:
     return output
 
 
+def _extract_hud_debug(hud_values: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(hud_values, dict):
+        return {}
+    debug = {}
+    for key, value in hud_values.items():
+        if (
+            key == "tesseract_cmd"
+            or key.endswith("_fail_reason")
+            or key.endswith("_ocr_ms")
+            or key.endswith("_rect")
+        ):
+            debug[key] = value
+    return debug
+
+
 def build_runtime_event(
     *,
     ts: float,
@@ -251,6 +266,7 @@ def build_runtime_event(
             "kills": getattr(snapshot, "kills", None),
             "gold": hud_values.get("gold"),
         },
+        "telemetry_raw": _extract_hud_debug(hud_values),
         "detections": {
             "enemies": _serialize_detection_list(getattr(snapshot, "enemies", [])),
             "obstacles": _serialize_detection_list(getattr(snapshot, "obstacles", [])),

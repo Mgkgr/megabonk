@@ -100,6 +100,7 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 - `window_title`: заголовок окна, из которого идёт захват
 - `frame_size`: размер кадра (`width`, `height`)
 - `telemetry`: HUD-метрики (`time`, `gold`, `lvl`, `kills`, `hp_ratio`)
+- `telemetry_raw`: сырые OCR-метаданные HUD (`*_fail_reason`, `*_ocr_ms`, `*_rect`, `tesseract_cmd`)
 - `latency_ms`: задержка итерации цикла
 
 Укороченный пример строки:
@@ -254,6 +255,21 @@ pytest -q
 - Нет OCR-значений HUD:
   - установите `pytesseract`
   - установите Tesseract OCR и при необходимости задайте `TESSERACT_CMD`
+
+### Настройка Tesseract OCR (`pytesseract`)
+
+Если `tesseract` не находится в `PATH`, задайте путь явно через переменную окружения `TESSERACT_CMD`.
+В коде этот путь автоматически прокидывается в `pytesseract.pytesseract.tesseract_cmd`.
+
+Пример (PowerShell):
+
+```powershell
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
+```
+
+Для Windows обычно используют установщик Tesseract от UB Mannheim; после установки
+можно либо добавить путь в `PATH`, либо использовать `TESSERACT_CMD`.
 
 - Нестабильный детект/клики:
   - переснимите `screen.png` и шаблоны на текущем разрешении/DPI

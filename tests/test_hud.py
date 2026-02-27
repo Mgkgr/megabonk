@@ -12,13 +12,24 @@ def test_read_hud_telemetry_has_lvl_and_kills_keys():
     telemetry = read_hud_telemetry(frame)
     for key in [
         "time",
+        "time_fail_reason",
+        "time_ocr_ms",
+        "time_rect",
         "hp_ratio",
+        "hp_fail_reason",
         "gold",
         "lvl",
         "kills",
         "gold_fail_reason",
+        "gold_ocr_ms",
+        "gold_rect",
         "lvl_fail_reason",
+        "lvl_ocr_ms",
+        "lvl_rect",
         "kills_fail_reason",
+        "kills_ocr_ms",
+        "kills_rect",
+        "tesseract_cmd",
     ]:
         assert key in telemetry
 

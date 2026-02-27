@@ -630,6 +630,7 @@ class MegabonkEnv(gym.Env):
         self._dbg_recognition_ts = 0.0
         self._dbg_hud_ts = 0.0
         self._hud_ocr_ts = 0.0
+        self._last_hud_ts = 0.0
         self._last_hud_values: dict[str, object] = {}
         self._hud_frame = None
         self._hud_lock = threading.Lock()
@@ -780,6 +781,17 @@ class MegabonkEnv(gym.Env):
         with self._hud_lock:
             return self._last_hud_values.get("kills")
 
+    def _get_cached_hud_debug(self):
+        with self._hud_lock:
+            hud_values = dict(self._last_hud_values)
+            hud_ts = float(self._last_hud_ts)
+        return {
+            "hud_ts": hud_ts,
+            "time_ocr_ms": hud_values.get("time_ocr_ms"),
+            "time_fail_reason": hud_values.get("time_fail_reason"),
+            "tesseract_cmd": hud_values.get("tesseract_cmd"),
+        }
+
     def _dump_hud_time_debug(self, frame, *, reason: str):
         if frame is None or frame.size == 0:
             return None
@@ -820,6 +832,7 @@ class MegabonkEnv(gym.Env):
                 )
             with self._hud_lock:
                 self._last_hud_values = hud_values
+                self._last_hud_ts = now
             time_val = hud_values.get("time")
             time_reason = hud_values.get("time_fail_reason")
             ocr_ms = hud_values.get("time_ocr_ms")
@@ -1324,6 +1337,7 @@ class MegabonkEnv(gym.Env):
                     "lvl": self._get_cached_lvl(),
                     "kills": self._get_cached_kills(),
                 }
+                info.update(self._get_cached_hud_debug())
                 self._finish_step_profile()
                 return obs, float(reward), terminated, False, info
             r_alive += 0.01
@@ -1368,6 +1382,7 @@ class MegabonkEnv(gym.Env):
             "lvl": self._get_cached_lvl(),
             "kills": self._get_cached_kills(),
         }
+        info.update(self._get_cached_hud_debug())
         self._finish_step_profile()
         return obs, float(reward), terminated, False, info
 

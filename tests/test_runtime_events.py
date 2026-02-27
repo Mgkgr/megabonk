@@ -37,7 +37,16 @@ def test_build_runtime_event_has_schema_and_telemetry_fields():
         frame_id=10,
         screen="RUNNING",
         snapshot=snapshot,
-        hud_values={"gold": 12345},
+        hud_values={
+            "gold": 12345,
+            "time_fail_reason": "ocr_empty",
+            "time_ocr_ms": 12.3,
+            "time_rect": (10, 20, 30, 40),
+            "gold_fail_reason": None,
+            "gold_ocr_ms": 3.2,
+            "gold_rect": (11, 21, 31, 41),
+            "tesseract_cmd": "/usr/bin/tesseract",
+        },
         action=action,
         action_reason=action.reason,
         restart_event=None,
@@ -57,3 +66,8 @@ def test_build_runtime_event_has_schema_and_telemetry_fields():
     assert event["schema_version"] == "runtime_events_v1"
     assert event["telemetry"]["time"] == 123.4
     assert event["telemetry"]["gold"] == 12345
+    assert event["telemetry_raw"]["time_fail_reason"] == "ocr_empty"
+    assert event["telemetry_raw"]["time_ocr_ms"] == 12.3
+    assert event["telemetry_raw"]["time_rect"] == (10, 20, 30, 40)
+    assert event["telemetry_raw"]["gold_ocr_ms"] == 3.2
+    assert event["telemetry_raw"]["tesseract_cmd"] == "/usr/bin/tesseract"
