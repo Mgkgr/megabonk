@@ -217,17 +217,28 @@ autopilot:
 Обучение:
 
 ```bash
-python train.py
+python train.py --window-title Megabonk --device cuda --timesteps 2000000
 ```
 
-Важно:
-- в `train.py` принудительно используется `device="cuda"`; без CUDA будет ошибка
-- модель сохраняется в `megabonk_ppo_cnn.zip`
+Ключевые PPO-гиперпараметры:
+- `--n-steps` — длина rollout до обновления политики
+- `--batch-size` — размер minibatch при SGD-обновлениях
+- `--gamma` — discount factor для будущих наград
+- описание параметров см. в официальной документации SB3 PPO: [stable-baselines3 PPO](https://stable-baselines3.readthedocs.io/en/master/modules/ppo.html)
+
+Пространства окружения (`MegabonkEnv`) в терминах Gymnasium:
+- `action_space`: [`gymnasium.spaces.MultiDiscrete`](https://gymnasium.farama.org/api/spaces/) (варианты зависят от `include_cam_yaw/include_cam_pitch`, см. docstring `MegabonkEnv`)
+- `observation_space`: [`gymnasium.spaces.Box`](https://gymnasium.farama.org/api/spaces/) с `shape=(84, 84, frame_stack)`, `dtype=uint8`
+
+Примечания:
+- `--device` можно выбрать `cpu`, `cuda`, `cuda:0` и т.д.
+- `--step-hz` фиксирует частоту шага окружения в `train.py`/`play.py` для воспроизводимых прогонов
+- модель по умолчанию сохраняется в `megabonk_ppo_cnn.zip` (через `--model-out` можно изменить)
 
 Инференс обученной модели:
 
 ```bash
-python play.py
+python play.py --model-path megabonk_ppo_cnn --device cpu --window-title Megabonk
 ```
 
 `play.py` ожидает файл модели `megabonk_ppo_cnn.zip` в корне проекта.
@@ -277,4 +288,4 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 
 - `train.py` падает на CUDA:
   - установите совместимую сборку `torch` с CUDA
-  - либо адаптируйте `train.py` под CPU (сейчас в коде стоит жесткая проверка CUDA)
+  - либо запустите на CPU через `python train.py --device cpu`

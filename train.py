@@ -4,6 +4,7 @@ from megabonk_bot.dpi import enable_dpi_awareness
 enable_dpi_awareness()
 # --- end DPI AWARE ---
 
+import argparse  # noqa: E402
 import torch  # noqa: E402
 from stable_baselines3 import PPO  # noqa: E402
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage  # noqa: E402
@@ -13,7 +14,7 @@ from stable_baselines3.common.callbacks import BaseCallback  # noqa: E402
 from megabonk_env import MegabonkEnv  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 
-WINDOW = "Megabonk"  # подстрой под реальный заголовок окна
+WINDOW = "Megabonk"
 
 
 class PrintCallback(BaseCallback):
@@ -32,20 +33,46 @@ class PrintCallback(BaseCallback):
             infos = self.locals.get("infos")
             if infos:
                 i = infos[0]
+                telemetry_keys = [k for k in ("hp_ratio", "lvl", "kills", "time") if k in i]
+                telemetry_repr = " ".join(f"{k}={self._fmt(i.get(k))}" for k in telemetry_keys)
                 print(
                     f"[{self.n_calls}] screen={i.get('screen')} "
-                    f"xp={self._fmt(i.get('xp_fill'))} hp={self._fmt(i.get('hp_fill'))} "
                     f"r=({self._fmt(i.get('r_alive'))},{self._fmt(i.get('r_xp'))},{self._fmt(i.get('r_dmg'))}) "
                     f"auto={i.get('autopilot')} safety={i.get('safety_override')} "
                     f"safety_strength={self._fmt(i.get('safety_strength'))} "
-                    f"recognized_time={i.get('time')}"
+                    f"{telemetry_repr}"
                 )
         return True
 
-def make_env():
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train PPO on MegabonkEnv.")
+    parser.add_argument("--timesteps", type=int, default=2_000_000, help="Total PPO timesteps.")
+    parser.add_argument("--n-steps", type=int, default=2048, help="PPO rollout length per env.")
+    parser.add_argument("--batch-size", type=int, default=256, help="PPO minibatch size.")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor.")
+    parser.add_argument("--lr", type=float, default=2.5e-4, help="Learning rate.")
+    parser.add_argument("--step-hz", type=int, default=12, help="Environment loop frequency.")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Torch device: cpu | cuda | cuda:0 ...",
+    )
+    parser.add_argument("--window-title", type=str, default=WINDOW, help="Game window title.")
+    parser.add_argument("--model-out", type=str, default="megabonk_ppo_cnn", help="Output model path.")
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=200,
+        help="Print callback frequency in environment steps.",
+    )
+    return parser.parse_args()
+
+
+def make_env(window_title: str, step_hz: int):
     env = MegabonkEnv(
-        window_title=WINDOW,
-        step_hz=12,
+        window_title=window_title,
+        step_hz=step_hz,
         templates_dir="templates",
         regions_builder=build_regions,
         safety_enabled=True,
@@ -57,29 +84,38 @@ def make_env():
     )
     return Monitor(env)
 
-env = DummyVecEnv([make_env])
-# SB3 ожидает (C,H,W), а у нас (H,W,C) — транспонируем
-env = VecTransposeImage(env)
-torch.backends.cudnn.benchmark = True
-if not torch.cuda.is_available():
-    raise RuntimeError("CUDA недоступна: проверьте установку драйвера и torch+CUDA.")
-device = "cuda"
-print("torch.cuda.is_available:", torch.cuda.is_available())
-print("torch.cuda.device_count:", torch.cuda.device_count())
-print("torch.cuda.device_name:", torch.cuda.get_device_name(0))
-print("device:", device)
+def main():
+    args = parse_args()
+    env = DummyVecEnv([lambda: make_env(args.window_title, args.step_hz)])
+    # SB3 ожидает (C,H,W), а у нас (H,W,C) — транспонируем
+    env = VecTransposeImage(env)
 
-model = PPO(
-    "CnnPolicy",
-    env,
-    verbose=1,
-    device=device,
-    n_steps=2048,
-    batch_size=256,
-    gamma=0.99,
-    learning_rate=2.5e-4,
-    tensorboard_log="tb",
-)
+    torch.backends.cudnn.benchmark = True
+    device = args.device
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA недоступна: передайте --device cpu или установите torch с CUDA.")
 
-model.learn(total_timesteps=2_000_000, callback=PrintCallback(every=200))
-model.save("megabonk_ppo_cnn")
+    print("torch.cuda.is_available:", torch.cuda.is_available())
+    print("torch.cuda.device_count:", torch.cuda.device_count())
+    if torch.cuda.is_available():
+        print("torch.cuda.device_name:", torch.cuda.get_device_name(0))
+    print("device:", device)
+
+    model = PPO(
+        "CnnPolicy",
+        env,
+        verbose=1,
+        device=device,
+        n_steps=args.n_steps,
+        batch_size=args.batch_size,
+        gamma=args.gamma,
+        learning_rate=args.lr,
+        tensorboard_log="tb",
+    )
+
+    model.learn(total_timesteps=args.timesteps, callback=PrintCallback(every=args.log_every))
+    model.save(args.model_out)
+
+
+if __name__ == "__main__":
+    main()
