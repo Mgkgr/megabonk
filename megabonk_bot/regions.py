@@ -1,6 +1,6 @@
 def build_regions(width, height):
-    time_x0, time_y0 = 28, 61
-    time_x1, time_y1 = 155, 102
+    time_x0, time_y0 = 70, 60
+    time_x1, time_y1 = 170, 100
     return {
         "REG_MAIN_PLAY": (
             int(0.40 * width),
@@ -51,28 +51,28 @@ def build_regions(width, height):
             int(0.12 * height),
         ),
         "REG_HUD_HP": (
-            int(0.04 * width),
-            int(0.02 * height),
-            int(0.12 * width),
-            int(0.05 * height),
+            int(100),
+            int(145),
+            int(185),
+            int(40),
         ),
         "REG_HUD_GOLD": (
-            int(0.85 * width),
-            int(0.02 * height),
-            int(0.12 * width),
-            int(0.05 * height),
+            int(530),
+            int(60),
+            int(100),
+            int(40),
         ),
         "REG_HUD_LVL": (
-            int(0.74 * width),
-            int(0.08 * height),
-            int(0.10 * width),
-            int(0.05 * height),
+            int(2480),
+            int(60),
+            int(120),
+            int(50),
         ),
         "REG_HUD_KILLS": (
-            int(0.63 * width),
-            int(0.08 * height),
-            int(0.10 * width),
-            int(0.05 * height),
+            int(780),
+            int(60),
+            int(150),
+            int(40),
         ),
         "REG_HUD_TIME": (
             time_x0,
