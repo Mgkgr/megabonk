@@ -81,6 +81,12 @@ pip install numpy opencv-python mss pydirectinput gymnasium stable-baselines3 to
 python make_templates.py
 ```
 
+Для автоматической нарезки HUD-полей под OCR (время, убийства, уровень, золото, hp):
+
+```bash
+python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/screen_crops
+```
+
 3. В окне выделяйте ROI мышью и задавайте имена шаблонов.
 4. Минимально полезные шаблоны:
 - `tpl_play`

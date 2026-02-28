@@ -211,6 +211,7 @@ def draw_recognition_overlay(
     hud_values: dict | None = None,
     hud_regions: dict | None = None,
     region_overlays: list[RegionOverlay] | None = None,
+    show_legend: bool = True,
 ) -> np.ndarray:
     canvas = frame_bgr.copy()
     overlay = frame_bgr.copy()
@@ -242,6 +243,8 @@ def draw_recognition_overlay(
         cv2.addWeighted(hud_overlay, hud_alpha, canvas, 1 - hud_alpha, 0, canvas)
         for rect, label, color in labels:
             _draw_labeled_box(canvas, rect, label, color)
+    if show_legend:
+        _draw_default_legend(canvas)
     return canvas
 
 
@@ -318,6 +321,45 @@ def _draw_labeled_box(
         text_size=(tw, th),
         baseline=baseline,
     )
+
+
+def _draw_default_legend(frame_bgr: np.ndarray) -> None:
+    items = [
+        ("surface", (60, 200, 60)),
+        ("obstacle", (40, 40, 220)),
+        ("enemy", (0, 0, 255)),
+        ("interactable", (255, 140, 0)),
+        ("hud_roi", (0, 255, 255)),
+    ]
+    x0 = 10
+    y0 = frame_bgr.shape[0] - 18 * (len(items) + 1) - 10
+    y0 = max(10, y0)
+    cv2.rectangle(frame_bgr, (x0 - 6, y0 - 18), (x0 + 220, y0 + 18 * len(items)), (0, 0, 0), -1)
+    cv2.rectangle(frame_bgr, (x0 - 6, y0 - 18), (x0 + 220, y0 + 18 * len(items)), (255, 255, 255), 1)
+    cv2.putText(
+        frame_bgr,
+        "Legend",
+        (x0, y0 - 4),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.45,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+    y = y0 + 12
+    for label, color in items:
+        cv2.rectangle(frame_bgr, (x0, y - 9), (x0 + 10, y + 1), color, -1)
+        cv2.putText(
+            frame_bgr,
+            label,
+            (x0 + 16, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        y += 18
 
 
 def _draw_label(

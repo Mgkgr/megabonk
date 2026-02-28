@@ -249,6 +249,56 @@ def _extract_hud_debug(hud_values: dict[str, Any]) -> dict[str, Any]:
     return debug
 
 
+def _point_in_rect(x: int, y: int, rect: Optional[tuple[int, int, int, int]]) -> bool:
+    if rect is None:
+        return False
+    rx, ry, rw, rh = rect
+    return rx <= x <= (rx + rw) and ry <= y <= (ry + rh)
+
+
+def _build_overlay_button_rects(frame_w: int) -> dict[str, tuple[int, int, int, int]]:
+    button_w = 170
+    button_h = 34
+    margin = 12
+    x = max(margin, int(frame_w) - button_w - margin)
+    return {
+        "toggle": (x, 10, button_w, button_h),
+        "panic": (x, 50, button_w, button_h),
+    }
+
+
+def _draw_overlay_button(
+    canvas,
+    rect: tuple[int, int, int, int],
+    label: str,
+    *,
+    bg_color: tuple[int, int, int],
+    border_color: tuple[int, int, int] = (255, 255, 255),
+):
+    x, y, w, h = rect
+    cv2.rectangle(canvas, (x, y), (x + w, y + h), bg_color, -1)
+    cv2.rectangle(canvas, (x, y), (x + w, y + h), border_color, 1)
+    cv2.putText(
+        canvas,
+        label,
+        (x + 10, y + 23),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def _format_float(value: Any, *, digits: int = 1) -> str:
+    if value is None:
+        return "?"
+    try:
+        return f"{float(value):.{digits}f}"
+    except Exception:
+        return str(value)
+
+
 def build_runtime_event(
     *,
     ts: float,
@@ -319,17 +369,59 @@ def build_runtime_event(
     }
 
 
-def _draw_runtime_overlay(frame, analysis, snapshot, *, mode, action_reason: str):
+def _draw_runtime_overlay(
+    frame,
+    analysis,
+    snapshot,
+    *,
+    mode,
+    action_reason: str,
+    hud_values: dict[str, Any],
+    hud_regions: dict[str, Any],
+):
     from megabonk_bot.recognition import draw_recognition_overlay
 
-    canvas = draw_recognition_overlay(frame, analysis)
+    hud_overlay_values = {
+        "time": hud_values.get("time"),
+        "kills": hud_values.get("kills"),
+        "lvl": hud_values.get("lvl"),
+        "gold": hud_values.get("gold"),
+        "hp": hud_values.get("hp_ratio"),
+    }
+    canvas = draw_recognition_overlay(
+        frame,
+        analysis,
+        hud_values=hud_overlay_values,
+        hud_regions=hud_regions,
+    )
     h, _ = canvas.shape[:2]
+    button_rects = _build_overlay_button_rects(canvas.shape[1])
+    if mode.value == "ACTIVE":
+        toggle_label = "STOP (F8/S)"
+        toggle_color = (20, 40, 160)
+    else:
+        toggle_label = "START (F8/S)"
+        toggle_color = (20, 120, 20)
+    _draw_overlay_button(canvas, button_rects["toggle"], toggle_label, bg_color=toggle_color)
+    _draw_overlay_button(canvas, button_rects["panic"], "PANIC (F12/P)", bg_color=(0, 0, 180))
+
+    hp_pct = (
+        "?"
+        if snapshot.hp_ratio is None
+        else f"{float(snapshot.hp_ratio) * 100.0:.1f}%"
+    )
+    time_fail = hud_values.get("time_fail_reason") or "ok"
+    kills_fail = hud_values.get("kills_fail_reason") or "ok"
     lines = [
         f"mode={mode.value}",
         f"reason={action_reason}",
-        f"hp={snapshot.hp_ratio} lvl={snapshot.lvl} kills={snapshot.kills} time={snapshot.time_s}",
+        f"hp={hp_pct} lvl={snapshot.lvl} kills={snapshot.kills} time={snapshot.time_s}",
+        f"gold={hud_values.get('gold')}  time_ocr={_format_float(hud_values.get('time_ocr_ms'))}ms ({time_fail})",
+        f"kills_ocr={_format_float(hud_values.get('kills_ocr_ms'))}ms ({kills_fail})",
         f"enemies={len(snapshot.enemies)} obstacles={len(snapshot.obstacles)} projectiles={len(snapshot.projectiles)}",
         f"dead={snapshot.is_dead} upgrade={snapshot.is_upgrade} safe_sector={snapshot.safe_sector}",
+        "legend: green=surface blue=obstacle red=enemy orange=interactable cyan=hud_roi",
+        "controls: click START/STOP or PANIC | Q/Esc=quit",
     ]
     y = 24
     for line in lines:
@@ -344,8 +436,14 @@ def _draw_runtime_overlay(frame, analysis, snapshot, *, mode, action_reason: str
             cv2.LINE_AA,
         )
         y += 24
-    cv2.rectangle(canvas, (8, 8), (890, min(h - 8, 8 + 24 * (len(lines) + 1))), (0, 0, 0), 2)
-    return canvas
+    cv2.rectangle(
+        canvas,
+        (8, 8),
+        (1060, min(h - 8, 8 + 24 * (len(lines) + 1))),
+        (0, 0, 0),
+        2,
+    )
+    return canvas, button_rects
 
 
 def _parse_boss_schedule(raw_items: list[dict[str, Any]], boss_window_cls) -> list[Any]:
@@ -481,11 +579,30 @@ def run(args) -> None:
     map_scan_tick = 0
     run_started_ts = time.time()
     overlay_topmost_applied = False
+    overlay_mouse_callback_set = False
+    overlay_controls = {"toggle": False, "panic": False, "rects": {}}
+    pending_toggle = False
+    pending_panic = False
+
+    def _on_overlay_mouse(event, x, y, _flags, state):
+        if event != cv2.EVENT_LBUTTONUP or not isinstance(state, dict):
+            return
+        rects = state.get("rects", {})
+        if _point_in_rect(int(x), int(y), rects.get("toggle")):
+            state["toggle"] = True
+        elif _point_in_rect(int(x), int(y), rects.get("panic")):
+            state["panic"] = True
 
     try:
         while True:
             loop_start = time.perf_counter()
-            toggle, panic = hotkeys.poll()
+            hotkey_toggle, hotkey_panic = hotkeys.poll()
+            toggle = bool(hotkey_toggle or pending_toggle or overlay_controls.get("toggle"))
+            panic = bool(hotkey_panic or pending_panic or overlay_controls.get("panic"))
+            pending_toggle = False
+            pending_panic = False
+            overlay_controls["toggle"] = False
+            overlay_controls["panic"] = False
             if panic:
                 mode = state_machine.on_events(panic=True)
                 release_all_keys()
@@ -706,20 +823,33 @@ def run(args) -> None:
                 logger.log(event)
 
             if overlay_enabled:
-                overlay = _draw_runtime_overlay(
+                overlay, button_rects = _draw_runtime_overlay(
                     frame,
                     analysis,
                     snapshot,
                     mode=mode,
                     action_reason=action.reason,
+                    hud_values=hud_values,
+                    hud_regions=regions,
                 )
+                overlay_controls["rects"] = button_rects
                 cv2.imshow(overlay_window, overlay)
+                if not overlay_mouse_callback_set:
+                    try:
+                        cv2.setMouseCallback(overlay_window, _on_overlay_mouse, overlay_controls)
+                        overlay_mouse_callback_set = True
+                    except Exception:
+                        overlay_mouse_callback_set = False
                 if not overlay_topmost_applied and runtime_cfg.get("overlay_topmost", True):
                     _set_overlay_topmost(overlay_window)
                     overlay_topmost_applied = True
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break
+                if key in (ord("s"), ord("S"), ord(" ")):
+                    pending_toggle = True
+                elif key in (ord("p"), ord("P")):
+                    pending_panic = True
 
             elapsed = time.perf_counter() - loop_start
             if elapsed < dt:

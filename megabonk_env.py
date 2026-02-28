@@ -7,6 +7,7 @@ import time  # noqa: E402
 import random  # noqa: E402
 import atexit  # noqa: E402
 import threading  # noqa: E402
+import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 from collections import deque  # noqa: E402
 
@@ -19,7 +20,11 @@ from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
 from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
-from megabonk_bot.hud import HUD_TIME_RECT, read_hud_telemetry  # noqa: E402
+from megabonk_bot.hud import (
+    HUD_TIME_RECT,
+    read_hud_telemetry,
+    resolve_hud_debug_rects,
+)  # noqa: E402
 from megabonk_bot.regions import build_regions  # noqa: E402
 from megabonk_bot.templates import load_templates  # noqa: E402
 from megabonk_bot.vision import find_in_region  # noqa: E402
@@ -796,16 +801,95 @@ class MegabonkEnv(gym.Env):
             "tesseract_cmd": hud_values.get("tesseract_cmd"),
         }
 
-    def _dump_hud_time_debug(self, frame, *, reason: str):
+    @staticmethod
+    def _sanitize_debug_token(value: str) -> str:
+        token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
+        token = token.strip("._-")
+        return token or "unknown"
+
+    def _dump_hud_time_debug(self, frame, *, reason: str, hud_values=None):
         if frame is None or frame.size == 0:
             return None
+        hud_values = dict(hud_values or {})
+        rects = resolve_hud_debug_rects(frame, regions=self.regions)
+        if "time" not in rects:
+            x, y, w, h = HUD_TIME_RECT
+            x = max(0, int(x))
+            y = max(0, int(y))
+            x1 = min(frame.shape[1], x + int(w))
+            y1 = min(frame.shape[0], y + int(h))
+            if x1 > x and y1 > y:
+                rects["time"] = (x, y, x1 - x, y1 - y)
+
         canvas = frame.copy()
-        x, y, w, h = HUD_TIME_RECT
-        x1 = min(canvas.shape[1] - 1, x + w)
-        y1 = min(canvas.shape[0] - 1, y + h)
-        cv2.rectangle(canvas, (x, y), (x1, y1), (0, 255, 255), 2)
         ts = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"hud_time_{reason}_{ts}.png"
+        safe_reason = self._sanitize_debug_token(reason)
+        cv2.putText(
+            canvas,
+            f"HUD debug reason={reason}",
+            (12, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+        key_to_value = {
+            "time": hud_values.get("time"),
+            "kills": hud_values.get("kills"),
+            "lvl": hud_values.get("lvl"),
+            "gold": hud_values.get("gold"),
+            "hp": hud_values.get("hp_ratio"),
+        }
+        key_to_fail_reason = {
+            "time": hud_values.get("time_fail_reason"),
+            "kills": hud_values.get("kills_fail_reason"),
+            "lvl": hud_values.get("lvl_fail_reason"),
+            "gold": hud_values.get("gold_fail_reason"),
+            "hp": hud_values.get("hp_fail_reason"),
+        }
+
+        crop_root = self.debug_hud_dir / "crops"
+        for key in ("time", "kills", "lvl", "gold", "hp"):
+            rect = rects.get(key)
+            if rect is None:
+                continue
+            x, y, w, h = rect
+            x1 = x + w
+            y1 = y + h
+            color = (0, 255, 255)
+            cv2.rectangle(canvas, (x, y), (x1, y1), color, 2)
+
+            value = key_to_value.get(key)
+            fail_reason = key_to_fail_reason.get(key)
+            if key == "hp":
+                value_text = "?" if value is None else f"{float(value) * 100.0:.1f}%"
+            else:
+                value_text = "?" if value is None else str(value)
+            status_text = "ok" if not fail_reason else str(fail_reason)
+            label = f"{key}={value_text} [{status_text}] ({x},{y},{w},{h})"
+            label_y = max(16, y - 8)
+            cv2.putText(
+                canvas,
+                label,
+                (x, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+
+            crop = frame[y:y1, x:x1]
+            if crop.size == 0:
+                continue
+            key_dir = crop_root / key
+            key_dir.mkdir(parents=True, exist_ok=True)
+            crop_name = f"{ts}_{safe_reason}_{key}.png"
+            cv2.imwrite(str(key_dir / crop_name), crop)
+
+        filename = f"hud_debug_{safe_reason}_{ts}.png"
         out_path = self.debug_hud_dir / filename
         cv2.imwrite(str(out_path), canvas)
         return out_path
@@ -827,12 +911,13 @@ class MegabonkEnv(gym.Env):
             self._hud_ocr_ts = now
             hud_values = read_hud_telemetry(frame, regions=self.regions)
             if not self._hud_debug_saved:
-                self._dump_hud_time_debug(frame, reason="startup")
+                self._dump_hud_time_debug(frame, reason="startup", hud_values=hud_values)
                 self._hud_debug_saved = True
             if hud_values.get("time") is None:
                 self._dump_hud_time_debug(
                     frame,
                     reason=hud_values.get("time_fail_reason") or "fail",
+                    hud_values=hud_values,
                 )
             with self._hud_lock:
                 self._last_hud_values = hud_values

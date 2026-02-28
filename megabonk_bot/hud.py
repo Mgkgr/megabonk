@@ -27,6 +27,8 @@ DEFAULT_HUD_REGIONS = {
     "kills": (0.63, 0.08, 0.10, 0.05),
 }
 
+HUD_DEBUG_KEYS = ("time", "kills", "lvl", "gold", "hp")
+
 
 def _get_tesseract():
     global _TESSERACT_CONFIGURED, _TESSERACT_LAST_ERROR_AT
@@ -86,6 +88,20 @@ def _resolve_region(frame, regions, key):
     h, w = frame.shape[:2]
     rx, ry, rw, rh = DEFAULT_HUD_REGIONS[key]
     return (int(rx * w), int(ry * h), int(rw * w), int(rh * h))
+
+
+def _clip_rect_to_frame(rect, frame_shape):
+    if rect is None:
+        return None
+    h, w = frame_shape[:2]
+    x, y, rw, rh = rect
+    x0 = max(0, int(x))
+    y0 = max(0, int(y))
+    x1 = min(int(w), int(x + rw))
+    y1 = min(int(h), int(y + rh))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1 - x0, y1 - y0)
 
 
 def _preprocess_for_ocr(roi_bgr, *, scale=3.0, adaptive=False):
@@ -242,6 +258,23 @@ def _resolve_time_roi(frame_bgr, regions=None):
     if roi.size == 0:
         return None, rect, "roi_empty"
     return roi, rect, None
+
+
+def resolve_hud_debug_rects(frame_bgr, regions=None):
+    """Возвращает валидные ROI HUD в координатах текущего кадра."""
+    if frame_bgr is None or frame_bgr.size == 0:
+        return {}
+    rects = {}
+    time_rect, _ = _resolve_time_rect(frame_bgr, regions=regions)
+    clipped_time = _clip_rect_to_frame(time_rect, frame_bgr.shape)
+    if clipped_time is not None:
+        rects["time"] = clipped_time
+    for key in ("kills", "lvl", "gold", "hp"):
+        rect = _resolve_region(frame_bgr, regions, key)
+        clipped = _clip_rect_to_frame(rect, frame_bgr.shape)
+        if clipped is not None:
+            rects[key] = clipped
+    return rects
 
 
 def read_hud_time(frame_bgr, regions=None, *, min_conf=45.0):
