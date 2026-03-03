@@ -15,6 +15,20 @@ from megabonk_bot.config import DEFAULT_CONFIG, dump_default_config_yaml, load_c
 cv2 = None
 di = None
 RUNTIME_EVENT_SCHEMA_VERSION = "runtime_events_v1"
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_SHOWWINDOW = 0x0040
+GWL_EXSTYLE = -20
+GWL_STYLE = -16
+WS_EX_LAYERED = 0x00080000
+LWA_COLORKEY = 0x00000001
+WS_CAPTION = 0x00C00000
+WS_THICKFRAME = 0x00040000
+WS_MINIMIZE = 0x20000000
+WS_MAXIMIZE = 0x01000000
+WS_SYSMENU = 0x00080000
 
 
 def key_on(key: str) -> None:
@@ -149,27 +163,114 @@ def _try_click_template(
     return score >= threshold
 
 
-def _set_overlay_topmost(window_name: str) -> None:
+def _set_overlay_topmost(window_name: str) -> bool:
     if not hasattr(ctypes, "windll"):
-        return
+        return False
     user32 = getattr(ctypes.windll, "user32", None)
     if user32 is None:
-        return
+        return False
     hwnd = user32.FindWindowW(None, window_name)
     if not hwnd:
-        return
-    HWND_TOPMOST = -1
-    SWP_NOMOVE = 0x0002
-    SWP_NOSIZE = 0x0001
-    SWP_SHOWWINDOW = 0x0040
-    user32.SetWindowPos(
-        hwnd,
-        HWND_TOPMOST,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        return False
+    return bool(
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+    )
+
+
+def _move_overlay_window(
+    window_name: str,
+    *,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    topmost: bool,
+) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    insert_after = HWND_TOPMOST if topmost else HWND_NOTOPMOST
+    return bool(
+        user32.SetWindowPos(
+            hwnd,
+            insert_after,
+            int(x),
+            int(y),
+            int(w),
+            int(h),
+            SWP_SHOWWINDOW,
+        )
+    )
+
+
+def _set_overlay_borderless(window_name: str) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU)
+    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+    return bool(
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        )
+    )
+
+
+def _set_overlay_colorkey_transparent(window_name: str, colorkey=(0, 0, 0)) -> bool:
+    if not hasattr(ctypes, "windll"):
+        return False
+    user32 = getattr(ctypes.windll, "user32", None)
+    if user32 is None:
+        return False
+    hwnd = user32.FindWindowW(None, window_name)
+    if not hwnd:
+        return False
+    exstyle = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    exstyle |= WS_EX_LAYERED
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
+    r, g, b = colorkey
+    colorref = int(r) | (int(g) << 8) | (int(b) << 16)
+    return bool(user32.SetLayeredWindowAttributes(hwnd, colorref, 0, LWA_COLORKEY))
+
+
+def _sync_overlay_to_game_window(
+    window_name: str,
+    bbox: dict[str, Any],
+    *,
+    topmost: bool,
+) -> bool:
+    return _move_overlay_window(
+        window_name,
+        x=int(bbox.get("left", 0)),
+        y=int(bbox.get("top", 0)),
+        w=max(1, int(bbox.get("width", 1))),
+        h=max(1, int(bbox.get("height", 1))),
+        topmost=topmost,
     )
 
 
@@ -378,6 +479,7 @@ def _draw_runtime_overlay(
     action_reason: str,
     hud_values: dict[str, Any],
     hud_regions: dict[str, Any],
+    transparent_canvas: bool = False,
 ):
     from megabonk_bot.recognition import draw_recognition_overlay
 
@@ -388,9 +490,18 @@ def _draw_runtime_overlay(
         "gold": hud_values.get("gold"),
         "hp": hud_values.get("hp_ratio"),
     }
+    base_frame = frame if not transparent_canvas else frame * 0
+    overlay_analysis = analysis
+    if transparent_canvas:
+        overlay_analysis = {
+            "grid": [],
+            "enemies": analysis.get("enemies", []),
+            "interactables": analysis.get("interactables", []),
+            "projectiles": analysis.get("projectiles", []),
+        }
     canvas = draw_recognition_overlay(
-        frame,
-        analysis,
+        base_frame,
+        overlay_analysis,
         hud_values=hud_overlay_values,
         hud_regions=hud_regions,
     )
@@ -440,7 +551,7 @@ def _draw_runtime_overlay(
         canvas,
         (8, 8),
         (1060, min(h - 8, 8 + 24 * (len(lines) + 1))),
-        (0, 0, 0),
+        (20, 20, 20) if transparent_canvas else (0, 0, 0),
         2,
     )
     return canvas, button_rects
@@ -525,6 +636,8 @@ def run(args) -> None:
     restart_max_attempts = max(1, int(runtime_cfg["restart_max_attempts"]))
     overlay_enabled = bool(runtime_cfg["overlay_enabled"]) and not args.no_overlay
     overlay_window = str(runtime_cfg["overlay_window"])
+    overlay_topmost_enabled = bool(runtime_cfg.get("overlay_topmost", True))
+    overlay_transparent = bool(runtime_cfg.get("overlay_transparent", True))
     window_title = str(args.window or runtime_cfg["window_title"])
     templates_dir = str(args.templates_dir or runtime_cfg["templates_dir"])
     capture_backend = str(args.capture_backend or runtime_cfg.get("capture_backend", "auto"))
@@ -579,6 +692,8 @@ def run(args) -> None:
     map_scan_tick = 0
     run_started_ts = time.time()
     overlay_topmost_applied = False
+    overlay_transparent_applied = False
+    overlay_borderless_applied = False
     overlay_mouse_callback_set = False
     overlay_controls = {"toggle": False, "panic": False, "rects": {}}
     pending_toggle = False
@@ -831,6 +946,7 @@ def run(args) -> None:
                     action_reason=action.reason,
                     hud_values=hud_values,
                     hud_regions=regions,
+                    transparent_canvas=overlay_transparent,
                 )
                 overlay_controls["rects"] = button_rects
                 cv2.imshow(overlay_window, overlay)
@@ -840,9 +956,26 @@ def run(args) -> None:
                         overlay_mouse_callback_set = True
                     except Exception:
                         overlay_mouse_callback_set = False
-                if not overlay_topmost_applied and runtime_cfg.get("overlay_topmost", True):
-                    _set_overlay_topmost(overlay_window)
-                    overlay_topmost_applied = True
+                if overlay_transparent:
+                    try:
+                        game_bbox = cap.get_bbox()
+                    except Exception:
+                        game_bbox = bbox
+                    _sync_overlay_to_game_window(
+                        overlay_window,
+                        game_bbox,
+                        topmost=overlay_topmost_enabled,
+                    )
+                    if not overlay_borderless_applied:
+                        overlay_borderless_applied = _set_overlay_borderless(overlay_window)
+                    if not overlay_transparent_applied:
+                        overlay_transparent_applied = _set_overlay_colorkey_transparent(
+                            overlay_window,
+                            colorkey=(0, 0, 0),
+                        )
+                    overlay_topmost_applied = overlay_topmost_enabled
+                elif not overlay_topmost_applied and overlay_topmost_enabled:
+                    overlay_topmost_applied = _set_overlay_topmost(overlay_window)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     break

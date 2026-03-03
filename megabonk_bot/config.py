@@ -24,6 +24,7 @@ class RuntimeConfig:
     overlay_enabled: bool = True
     overlay_window: str = "Megabonk Runtime Bot"
     overlay_topmost: bool = True
+    overlay_transparent: bool = True
     event_log_path: str = "logs/runtime_events.jsonl"
     event_log_interval_s: float = 0.2
     upgrade_space_cooldown_s: float = 0.3

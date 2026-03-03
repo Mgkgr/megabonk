@@ -12,6 +12,7 @@ runtime:
   overlay_enabled: true
   overlay_window: Megabonk Runtime Bot
   overlay_topmost: true
+  overlay_transparent: true
   event_log_path: logs/runtime_events.jsonl
   event_log_interval_s: 0.2
   upgrade_space_cooldown_s: 0.3

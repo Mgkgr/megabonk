@@ -101,6 +101,7 @@ python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/s
 - `runtime.capture_backend` — `auto` / `printwindow` / `mss`.
 - `runtime.templates_dir` — папка шаблонов (обычно `templates`).
 - `runtime.overlay_enabled` — показывать ли окно оверлея.
+- `runtime.overlay_transparent` — прозрачный HUD-оверлей поверх окна игры.
 - `hotkeys.toggle_vk` / `hotkeys.panic_vk` — hotkeys (по умолчанию F8/F12).
 
 Если не уверены в значениях, оставьте дефолт и правьте только `window_title`.
