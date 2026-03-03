@@ -7,14 +7,18 @@ runtime:
   step_hz: 12
   window_title: Megabonk
   capture_backend: auto
+  capture_log_errors: true
   window_focus_interval_s: 0.25
   templates_dir: templates
   overlay_enabled: true
   overlay_window: Megabonk Runtime Bot
   overlay_topmost: true
   overlay_transparent: true
+  hud_debug_save_policy: on_fail_change
+  hud_debug_min_interval_s: 15.0
   event_log_path: logs/runtime_events.jsonl
   event_log_interval_s: 0.2
+  event_schema_version: runtime_events_v2
   upgrade_space_cooldown_s: 0.3
   cam_yaw_pixels: 160
   restart_cooldown_s: 3.5

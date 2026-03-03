@@ -41,6 +41,10 @@ FULL_COLUMNS = [
     "boss_prep",
     "boss_name",
     "preferred_direction",
+    "capture_bad_grab_count",
+    "capture_last_error",
+    "hud_debug_dumped",
+    "hud_fail_streak",
 ]
 
 
@@ -71,6 +75,12 @@ def _event_to_full_row(event: dict[str, Any]) -> dict[str, Any]:
     telemetry = event.get("telemetry")
     if not isinstance(telemetry, dict):
         telemetry = {}
+    capture = event.get("capture")
+    if not isinstance(capture, dict):
+        capture = {}
+    hud = event.get("hud")
+    if not isinstance(hud, dict):
+        hud = {}
     frame_w, frame_h = _extract_frame_size(event.get("frame_size"))
     return {
         "schema_version": event.get("schema_version", "legacy"),
@@ -97,6 +107,10 @@ def _event_to_full_row(event: dict[str, Any]) -> dict[str, Any]:
         "boss_prep": event.get("boss_prep"),
         "boss_name": event.get("boss_name"),
         "preferred_direction": event.get("preferred_direction"),
+        "capture_bad_grab_count": capture.get("bad_grab_count"),
+        "capture_last_error": capture.get("last_error"),
+        "hud_debug_dumped": hud.get("debug_dumped"),
+        "hud_fail_streak": hud.get("fail_streak"),
     }
 
 

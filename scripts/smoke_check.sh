@@ -20,6 +20,15 @@ python -m py_compile \
   megabonk_bot/hud.py \
   megabonk_bot/runtime_logic.py \
   megabonk_bot/runtime_state.py \
-  megabonk_bot/max_model.py
+  megabonk_bot/max_model.py \
+  megabonk_bot/runtime/input_controller.py \
+  megabonk_bot/runtime/event_logger.py \
+  megabonk_bot/runtime/overlay.py \
+  megabonk_bot/runtime/recovery.py \
+  megabonk_bot/runtime/loop.py \
+  megabonk_bot/env/hud_worker.py \
+  megabonk_bot/env/reward_engine.py \
+  megabonk_bot/env/safety_policy.py \
+  megabonk_bot/env/restart_flow.py
 
 echo "[smoke] OK"

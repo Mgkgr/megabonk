@@ -61,6 +61,7 @@ def test_build_runtime_event_has_schema_and_telemetry_fields():
         window_title="Megabonk",
         frame_width=1280,
         frame_height=720,
+        schema_version="runtime_events_v1",
     )
 
     assert event["schema_version"] == "runtime_events_v1"

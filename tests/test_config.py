@@ -7,6 +7,10 @@ def test_load_config_defaults():
     config = load_config(None)
     assert config["runtime"]["step_hz"] == 12
     assert config["runtime"]["capture_backend"] == "auto"
+    assert config["runtime"]["capture_log_errors"] is True
+    assert config["runtime"]["hud_debug_save_policy"] == "on_fail_change"
+    assert config["runtime"]["hud_debug_min_interval_s"] == 15.0
+    assert config["runtime"]["event_schema_version"] == "runtime_events_v2"
     assert config["runtime"]["window_focus_interval_s"] == 0.25
     assert config["runtime"]["event_log_interval_s"] == 0.2
     assert config["mvp_policy"]["map_scan_interval_ticks"] == 180

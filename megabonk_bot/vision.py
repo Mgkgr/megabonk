@@ -1,7 +1,7 @@
-from pathlib import Path
-
 import cv2
 import numpy as np
+
+from megabonk_bot.templates import load_templates
 
 
 def match_template(gray_img, gray_tpl):
@@ -124,19 +124,3 @@ def find_in_region(
 
 def normalize_region(w, h, rx, ry, rw, rh):
     return (int(rx * w), int(ry * h), int(rw * w), int(rh * h))
-
-
-def load_templates(templates_dir):
-    templates = {}
-    if templates_dir is None:
-        return templates
-
-    path = Path(templates_dir)
-    if not path.exists():
-        return templates
-
-    for tpl_path in path.glob("*.png"):
-        img = cv2.imread(str(tpl_path))
-        if img is not None:
-            templates[tpl_path.stem] = img
-    return templates

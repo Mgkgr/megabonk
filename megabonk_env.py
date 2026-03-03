@@ -19,6 +19,17 @@ import pydirectinput as di  # noqa: E402
 from gymnasium import spaces  # noqa: E402
 
 from autopilot import AutoPilot, HeuristicAutoPilot  # noqa: E402
+from megabonk_bot.env.hud_worker import (  # noqa: E402
+    HudDumpPolicyState,
+    normalize_hud_debug_policy,
+    should_dump_hud_debug,
+)
+from megabonk_bot.env.restart_flow import is_restart_timeout, should_skip_restart  # noqa: E402
+from megabonk_bot.env.reward_engine import compute_reward_components  # noqa: E402
+from megabonk_bot.env.safety_policy import (  # noqa: E402
+    apply_safety_override as apply_safety_override_policy,
+    current_safety_strength as current_safety_strength_policy,
+)
 from megabonk_bot.recognition import analyze_scene, draw_recognition_overlay  # noqa: E402
 from megabonk_bot.hud import (
     HUD_TIME_RECT,
@@ -512,6 +523,9 @@ class MegabonkEnv(gym.Env):
         debug_recognition_window: str = "Megabonk Recognition",
         debug_recognition_topmost: bool = True,
         debug_recognition_transparent: bool = True,
+        hud_debug_save_policy: str = "on_fail_change",
+        hud_debug_min_interval_s: float = 15.0,
+        capture_log_errors: bool = True,
         hud_ocr_every_s: float = 0.8,
         death_check_every: int = 8,
         reward_danger_k: float = 0.15,
@@ -613,7 +627,10 @@ class MegabonkEnv(gym.Env):
         self.debug_recognition_dir = Path(debug_recognition_dir)
         self.debug_recognition_every_s = float(debug_recognition_every_s)
         self.debug_hud_dir = Path("dbg_hud")
-        self._hud_debug_saved = False
+        self.hud_debug_save_policy = normalize_hud_debug_policy(hud_debug_save_policy)
+        self.hud_debug_min_interval_s = max(0.0, float(hud_debug_min_interval_s))
+        self.capture_log_errors = bool(capture_log_errors)
+        self._hud_dump_state = HudDumpPolicyState()
         self.hud_ocr_every_s = float(hud_ocr_every_s)
         self.recognition_grid = recognition_grid
         self._dbg_recognition_idx = 0
@@ -645,6 +662,11 @@ class MegabonkEnv(gym.Env):
         self._hud_lock = threading.Lock()
         self._hud_stop = threading.Event()
         self._hud_thread = None
+        self._hud_last_debug_dumped = False
+        self._hud_fail_streak = 0
+        self._capture_warn_interval_s = 5.0
+        self._last_capture_warn_ts = 0.0
+        self._last_capture_error = None
         self._event_lock = threading.Lock()
         self._event_idx = 0
         self._prof_last_log_ts = time.time()
@@ -754,6 +776,18 @@ class MegabonkEnv(gym.Env):
         for key in self._prof_accum:
             self._prof_accum[key] = 0.0
 
+    def _maybe_log_capture_error(self, error: str | None):
+        if not self.capture_log_errors or not error:
+            return
+        now = time.time()
+        if (now - self._last_capture_warn_ts) < self._capture_warn_interval_s:
+            return
+        self._last_capture_warn_ts = now
+        bad_grab_count = 0
+        if self.cap is not None:
+            bad_grab_count = int(getattr(self.cap, "_bad_grab_count", 0))
+        self._log_event("CAPTURE_WARN", error=error, bad_grab_count=bad_grab_count)
+
     def _start_hud_thread(self):
         if self.hud_ocr_every_s <= 0 or self._hud_thread is not None:
             return
@@ -794,11 +828,15 @@ class MegabonkEnv(gym.Env):
         with self._hud_lock:
             hud_values = dict(self._last_hud_values)
             hud_ts = float(self._last_hud_ts)
+            debug_dumped = bool(self._hud_last_debug_dumped)
+            hud_fail_streak = int(self._hud_fail_streak)
         return {
             "hud_ts": hud_ts,
             "time_ocr_ms": hud_values.get("time_ocr_ms"),
             "time_fail_reason": hud_values.get("time_fail_reason"),
             "tesseract_cmd": hud_values.get("tesseract_cmd"),
+            "debug_dumped": debug_dumped,
+            "hud_fail_streak": hud_fail_streak,
         }
 
     @staticmethod
@@ -910,18 +948,36 @@ class MegabonkEnv(gym.Env):
                 continue
             self._hud_ocr_ts = now
             hud_values = read_hud_telemetry(frame, regions=self.regions)
-            if not self._hud_debug_saved:
+            debug_dumped = False
+            if should_dump_hud_debug(
+                state=self._hud_dump_state,
+                policy=self.hud_debug_save_policy,
+                now=now,
+                fail_reason=None,
+                min_interval_s=self.hud_debug_min_interval_s,
+                startup=True,
+            ):
                 self._dump_hud_time_debug(frame, reason="startup", hud_values=hud_values)
-                self._hud_debug_saved = True
-            if hud_values.get("time") is None:
+                debug_dumped = True
+            fail_reason = hud_values.get("time_fail_reason") if hud_values.get("time") is None else None
+            if should_dump_hud_debug(
+                state=self._hud_dump_state,
+                policy=self.hud_debug_save_policy,
+                now=now,
+                fail_reason=fail_reason,
+                min_interval_s=self.hud_debug_min_interval_s,
+            ):
                 self._dump_hud_time_debug(
                     frame,
-                    reason=hud_values.get("time_fail_reason") or "fail",
+                    reason=fail_reason or "fail",
                     hud_values=hud_values,
                 )
+                debug_dumped = True
             with self._hud_lock:
                 self._last_hud_values = hud_values
                 self._last_hud_ts = now
+                self._hud_last_debug_dumped = debug_dumped
+                self._hud_fail_streak = int(self._hud_dump_state.fail_streak)
             time_val = hud_values.get("time")
             time_reason = hud_values.get("time_fail_reason")
             ocr_ms = hud_values.get("time_ocr_ms")
@@ -1020,19 +1076,37 @@ class MegabonkEnv(gym.Env):
         if self.cap is not None:
             try:
                 frame = self.cap.grab()
-            except Exception:
+            except Exception as exc:
+                self._last_capture_error = f"{exc.__class__.__name__}: {exc}"
+                self._maybe_log_capture_error(self._last_capture_error)
                 frame = None
+            diagnostics = None
+            if hasattr(self.cap, "get_capture_diagnostics"):
+                diagnostics = self.cap.get_capture_diagnostics()
+            if isinstance(diagnostics, dict):
+                self._last_capture_error = diagnostics.get("last_error")
+                self._maybe_log_capture_error(self._last_capture_error)
             if frame is None or frame.size == 0:
                 try:
                     self.cap.focus(topmost=True)
                     time.sleep(0.05)
                     frame = self.cap.grab()
-                except Exception:
+                    diagnostics = None
+                    if hasattr(self.cap, "get_capture_diagnostics"):
+                        diagnostics = self.cap.get_capture_diagnostics()
+                    if isinstance(diagnostics, dict):
+                        self._last_capture_error = diagnostics.get("last_error")
+                        self._maybe_log_capture_error(self._last_capture_error)
+                except Exception as exc:
+                    self._last_capture_error = f"{exc.__class__.__name__}: {exc}"
+                    self._maybe_log_capture_error(self._last_capture_error)
                     frame = None
         else:
             try:
                 frame = np.array(self.sct.grab(self.region))[:, :, :3]
-            except Exception:
+            except Exception as exc:
+                self._last_capture_error = f"{exc.__class__.__name__}: {exc}"
+                self._maybe_log_capture_error(self._last_capture_error)
                 frame = None
         if frame is None or frame.size == 0:
             if self._last_frame is not None:
@@ -1040,6 +1114,7 @@ class MegabonkEnv(gym.Env):
             height = int(self.region["height"])
             width = int(self.region["width"])
             return np.zeros((height, width, 3), dtype=np.uint8)
+        self._last_capture_error = None
         self._refresh_regions_for_frame(frame)
         self._last_frame = frame
         return frame
@@ -1122,33 +1197,34 @@ class MegabonkEnv(gym.Env):
         return float(diff.mean()) < self.reward_stuck_diff_threshold
 
     def _current_safety_strength(self) -> float:
-        if not self.safety_enabled:
-            return 0.0
-        if self.safety_anneal_steps <= 0:
-            return max(0.0, self.safety_strength)
-        progress = min(1.0, self._safety_step_count / float(self.safety_anneal_steps))
-        strength = self.safety_strength * (1.0 - progress)
-        return max(self.safety_min_strength, strength)
+        return current_safety_strength_policy(
+            safety_enabled=self.safety_enabled,
+            safety_strength=self.safety_strength,
+            safety_anneal_steps=self.safety_anneal_steps,
+            safety_min_strength=self.safety_min_strength,
+            safety_step_count=self._safety_step_count,
+        )
 
     def _apply_safety_override(self, dir_id, yaw, pitch, jump, slide, danger_now, stuck_now):
         strength = self._current_safety_strength()
-        if strength <= 0.0:
-            return dir_id, yaw, pitch, jump, slide, None, strength
-        if not (danger_now or stuck_now):
-            return dir_id, yaw, pitch, jump, slide, None, strength
-        if random.random() > strength:
-            return dir_id, yaw, pitch, jump, slide, None, strength
-        if danger_now:
-            safe_dir = 2
-            safe_jump = 1
-            safe_slide = 0
-            reason = "danger"
-        else:
-            safe_dir = 0
-            safe_jump = 1
-            safe_slide = 0
-            reason = "stuck"
-        return safe_dir, 1, 1, safe_jump, safe_slide, reason, strength
+        (
+            safe_dir,
+            safe_yaw,
+            safe_pitch,
+            safe_jump,
+            safe_slide,
+            reason,
+        ) = apply_safety_override_policy(
+            dir_id=dir_id,
+            yaw=yaw,
+            pitch=pitch,
+            jump=jump,
+            slide=slide,
+            danger_now=danger_now,
+            stuck_now=stuck_now,
+            strength=strength,
+        )
+        return safe_dir, safe_yaw, safe_pitch, safe_jump, safe_slide, reason, strength
 
     def _get_obs(self):
         # гарантируем ровно frame_stack кадров всегда
@@ -1218,6 +1294,7 @@ class MegabonkEnv(gym.Env):
     def step(self, action):
         capture_start = time.perf_counter()
         frame = self._grab_frame()
+        last_frame_bgr = frame
         self._prof_add("capture", time.perf_counter() - capture_start)
         now = time.time()
         screen = "UNKNOWN"
@@ -1379,6 +1456,7 @@ class MegabonkEnv(gym.Env):
             time.sleep(self.dt)
             capture_start = time.perf_counter()
             frame_bgr = self._grab_frame()
+            last_frame_bgr = frame_bgr
             self._prof_add("capture", time.perf_counter() - capture_start)
             death_start = time.perf_counter()
             f = self._to_gray84(frame_bgr)
@@ -1456,25 +1534,47 @@ class MegabonkEnv(gym.Env):
                     "hp_ratio": self._get_cached_hp_ratio(),
                     "lvl": self._get_cached_lvl(),
                     "kills": self._get_cached_kills(),
+                    "capture_last_error": self._last_capture_error,
+                    "capture_bad_grab_count": int(
+                        getattr(self.cap, "_bad_grab_count", 0)
+                    )
+                    if self.cap is not None
+                    else 0,
                 }
                 info.update(self._get_cached_hud_debug())
                 self._finish_step_profile()
                 return obs, float(reward), terminated, False, info
             r_alive += 0.01
 
+        reward_frame = last_frame_bgr if last_frame_bgr is not None else frame
+        danger_center, danger_area, danger_frac = self._find_center_area_in_roi(
+            reward_frame,
+            self.reward_enemy_hsv_lower,
+            self.reward_enemy_hsv_upper,
+            self.reward_enemy_roi,
+        )
         forwardish = dir_id in (1, 5, 6)
         loot_center, loot_area, loot_frac = self._find_center_area_in_roi(
-            frame,
+            reward_frame,
             self.reward_coin_hsv_lower,
             self.reward_coin_hsv_upper,
             self.reward_loot_roi,
         )
-        if danger_center is not None and danger_area > 0:
-            r_danger = -self.reward_danger_k * danger_frac
-        if loot_center is not None and loot_area > 0:
-            r_loot = self.reward_loot_k * loot_frac
-        if self._is_reward_stuck(frame, forwardish):
-            r_stuck = -self.reward_stuck_k
+        reward_components = compute_reward_components(
+            danger_center=danger_center,
+            danger_area=danger_area,
+            danger_frac=danger_frac,
+            loot_center=loot_center,
+            loot_area=loot_area,
+            loot_frac=loot_frac,
+            is_stuck=self._is_reward_stuck(reward_frame, forwardish),
+            reward_danger_k=self.reward_danger_k,
+            reward_stuck_k=self.reward_stuck_k,
+            reward_loot_k=self.reward_loot_k,
+        )
+        r_danger = reward_components.danger
+        r_loot = reward_components.loot
+        r_stuck = reward_components.stuck
 
         obs = self._get_obs()
         reward = r_alive + r_xp + r_dmg + r_danger + r_stuck + r_loot
@@ -1501,6 +1601,10 @@ class MegabonkEnv(gym.Env):
             "hp_ratio": self._get_cached_hp_ratio(),
             "lvl": self._get_cached_lvl(),
             "kills": self._get_cached_kills(),
+            "capture_last_error": self._last_capture_error,
+            "capture_bad_grab_count": int(getattr(self.cap, "_bad_grab_count", 0))
+            if self.cap is not None
+            else 0,
         }
         info.update(self._get_cached_hud_debug())
         self._finish_step_profile()
@@ -1516,7 +1620,7 @@ class MegabonkEnv(gym.Env):
 
     def _wait_for_running(self, timeout_s: float) -> bool:
         t0 = time.time()
-        while time.time() - t0 < timeout_s:
+        while not is_restart_timeout(now=time.time(), started_ts=t0, timeout_s=timeout_s):
             frame = self._grab_frame()
             gray = self._to_gray84(frame)
             if self._is_running_frame(frame, gray):
@@ -1526,7 +1630,11 @@ class MegabonkEnv(gym.Env):
 
     def _restart_after_death(self, *, death_streak: int, reason: str):
         now = time.time()
-        if now - self._last_dead_r_time < self.restart_cooldown_s:
+        if should_skip_restart(
+            now=now,
+            last_restart_ts=self._last_dead_r_time,
+            cooldown_s=self.restart_cooldown_s,
+        ):
             self._log_event(
                 "RESTART_SKIPPED_COOLDOWN",
                 reason=reason,

@@ -4,17 +4,34 @@ enable_dpi_awareness()
 
 import argparse
 import ctypes
-import json
 import time
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
 from megabonk_bot.config import DEFAULT_CONFIG, dump_default_config_yaml, load_config
+from megabonk_bot.runtime.event_logger import (
+    JsonlEventLogger,
+    RUNTIME_EVENT_SCHEMA_VERSION,
+    build_runtime_event as _build_runtime_event,
+)
+from megabonk_bot.runtime.input_controller import (
+    apply_cam_yaw as _runtime_apply_cam_yaw,
+    hold as _runtime_hold,
+    key_off as _runtime_key_off,
+    key_on as _runtime_key_on,
+    release_all_keys as _runtime_release_all_keys,
+    set_move as _runtime_set_move,
+    tap as _runtime_tap,
+)
+from megabonk_bot.runtime.loop import RateLimiter, maybe_warn_capture_error
+from megabonk_bot.runtime.overlay import (
+    draw_runtime_overlay as _runtime_draw_runtime_overlay,
+    point_in_rect as _runtime_point_in_rect,
+)
+from megabonk_bot.runtime.recovery import RecoveryState, decide_recovery_action
 
 cv2 = None
 di = None
-RUNTIME_EVENT_SCHEMA_VERSION = "runtime_events_v1"
 HWND_TOPMOST = -1
 HWND_NOTOPMOST = -2
 SWP_NOMOVE = 0x0002
@@ -32,68 +49,31 @@ WS_SYSMENU = 0x00080000
 
 
 def key_on(key: str) -> None:
-    di.keyDown(key)
+    _runtime_key_on(di, key)
 
 
 def key_off(key: str) -> None:
-    di.keyUp(key)
+    _runtime_key_off(di, key)
 
 
 def tap(key: str, dt: float = 0.01) -> None:
-    di.keyDown(key)
-    time.sleep(max(0.0, float(dt)))
-    di.keyUp(key)
+    _runtime_tap(di, key, dt=dt)
 
 
 def hold(key: str, dt: float = 0.5) -> None:
-    di.keyDown(key)
-    time.sleep(max(0.0, float(dt)))
-    di.keyUp(key)
+    _runtime_hold(di, key, dt=dt)
 
 
 def set_move(dir_id: int) -> None:
-    mapping = {
-        0: [],
-        1: ["w"],
-        2: ["s"],
-        3: ["a"],
-        4: ["d"],
-        5: ["w", "a"],
-        6: ["w", "d"],
-        7: ["s", "a"],
-        8: ["s", "d"],
-    }
-    want = set(mapping.get(int(dir_id), []))
-    for key in ["w", "a", "s", "d"]:
-        (key_on if key in want else key_off)(key)
+    _runtime_set_move(di, dir_id)
 
 
 def release_all_keys() -> None:
-    for key in [
-        "w",
-        "a",
-        "s",
-        "d",
-        "left",
-        "right",
-        "up",
-        "down",
-        "space",
-        "lctrl",
-        "shift",
-        "tab",
-    ]:
-        try:
-            di.keyUp(key)
-        except Exception:
-            pass
+    _runtime_release_all_keys(di)
 
 
 def apply_cam_yaw(yaw_id: int, cam_yaw_pixels: int) -> None:
-    mapping = {0: -int(cam_yaw_pixels), 1: 0, 2: int(cam_yaw_pixels)}
-    dx = mapping.get(int(yaw_id), 0)
-    if dx != 0:
-        di.moveRel(dx, 0, duration=0)
+    _runtime_apply_cam_yaw(di, yaw_id, cam_yaw_pixels)
 
 
 def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
@@ -304,100 +284,8 @@ class WinHotkeyPoller:
         return toggle, panic
 
 
-class JsonlEventLogger:
-    def __init__(self, path: Path):
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fp = self.path.open("a", encoding="utf-8")
-
-    def log(self, event: dict[str, Any]) -> None:
-        self._fp.write(json.dumps(event, ensure_ascii=False) + "\n")
-        self._fp.flush()
-
-    def close(self) -> None:
-        try:
-            self._fp.close()
-        except Exception:
-            pass
-
-
-def _serialize_detection_list(items) -> list[dict[str, Any]]:
-    output = []
-    for item in items:
-        if hasattr(item, "label") and hasattr(item, "rect") and hasattr(item, "score"):
-            output.append(
-                {
-                    "label": getattr(item, "label"),
-                    "rect": list(getattr(item, "rect")),
-                    "score": float(getattr(item, "score")),
-                }
-            )
-    return output
-
-
-def _extract_hud_debug(hud_values: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(hud_values, dict):
-        return {}
-    debug = {}
-    for key, value in hud_values.items():
-        if (
-            key == "tesseract_cmd"
-            or key.endswith("_fail_reason")
-            or key.endswith("_ocr_ms")
-            or key.endswith("_rect")
-        ):
-            debug[key] = value
-    return debug
-
-
 def _point_in_rect(x: int, y: int, rect: Optional[tuple[int, int, int, int]]) -> bool:
-    if rect is None:
-        return False
-    rx, ry, rw, rh = rect
-    return rx <= x <= (rx + rw) and ry <= y <= (ry + rh)
-
-
-def _build_overlay_button_rects(frame_w: int) -> dict[str, tuple[int, int, int, int]]:
-    button_w = 170
-    button_h = 34
-    margin = 12
-    x = max(margin, int(frame_w) - button_w - margin)
-    return {
-        "toggle": (x, 10, button_w, button_h),
-        "panic": (x, 50, button_w, button_h),
-    }
-
-
-def _draw_overlay_button(
-    canvas,
-    rect: tuple[int, int, int, int],
-    label: str,
-    *,
-    bg_color: tuple[int, int, int],
-    border_color: tuple[int, int, int] = (255, 255, 255),
-):
-    x, y, w, h = rect
-    cv2.rectangle(canvas, (x, y), (x + w, y + h), bg_color, -1)
-    cv2.rectangle(canvas, (x, y), (x + w, y + h), border_color, 1)
-    cv2.putText(
-        canvas,
-        label,
-        (x + 10, y + 23),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-
-
-def _format_float(value: Any, *, digits: int = 1) -> str:
-    if value is None:
-        return "?"
-    try:
-        return f"{float(value):.{digits}f}"
-    except Exception:
-        return str(value)
+    return _runtime_point_in_rect(x, y, rect)
 
 
 def build_runtime_event(
@@ -422,52 +310,39 @@ def build_runtime_event(
     window_title: str,
     frame_width: int,
     frame_height: int,
+    capture_bad_grab_count: int = 0,
+    capture_last_error: Optional[str] = None,
+    hud_debug_dumped: bool = False,
+    hud_fail_streak: int = 0,
     schema_version: str = RUNTIME_EVENT_SCHEMA_VERSION,
 ) -> dict[str, Any]:
-    return {
-        "schema_version": schema_version,
-        "ts": ts,
-        "mode": mode.value,
-        "frame_id": int(frame_id),
-        "step_hz": int(step_hz),
-        "dt_ms": float(dt) * 1000.0,
-        "window_title": str(window_title),
-        "frame_size": {"width": int(frame_width), "height": int(frame_height)},
-        "screen": screen,
-        "telemetry": {
-            "time": getattr(snapshot, "time_s", None),
-            "hp_ratio": getattr(snapshot, "hp_ratio", None),
-            "lvl": getattr(snapshot, "lvl", None),
-            "kills": getattr(snapshot, "kills", None),
-            "gold": hud_values.get("gold"),
-        },
-        "telemetry_raw": _extract_hud_debug(hud_values),
-        "detections": {
-            "enemies": _serialize_detection_list(getattr(snapshot, "enemies", [])),
-            "obstacles": _serialize_detection_list(getattr(snapshot, "obstacles", [])),
-            "projectiles": _serialize_detection_list(getattr(snapshot, "projectiles", [])),
-            "interactables": _serialize_detection_list(getattr(snapshot, "interactables", [])),
-        },
-        "action": asdict(action),
-        "reason": action_reason,
-        "restart": restart_event,
-        "safe_sector": safe_sector,
-        "is_dead": bool(getattr(snapshot, "is_dead", False)),
-        "is_upgrade": bool(getattr(snapshot, "is_upgrade", False)),
-        "boss_prep": bool(boss_prep),
-        "boss_name": boss_name,
-        "preferred_direction": preferred_direction,
-        "top_threats": [
-            {
-                "label": threat.label,
-                "rect": list(threat.rect),
-                "priority": threat.priority,
-                "distance_norm": threat.distance_norm,
-            }
-            for threat in threats[:3]
-        ],
-        "latency_ms": (time.perf_counter() - loop_start) * 1000.0,
-    }
+    return _build_runtime_event(
+        ts=ts,
+        mode=mode,
+        frame_id=frame_id,
+        screen=screen,
+        snapshot=snapshot,
+        hud_values=hud_values,
+        action=action,
+        action_reason=action_reason,
+        restart_event=restart_event,
+        safe_sector=safe_sector,
+        boss_prep=boss_prep,
+        boss_name=boss_name,
+        preferred_direction=preferred_direction,
+        threats=threats,
+        loop_start=loop_start,
+        step_hz=step_hz,
+        dt=dt,
+        window_title=window_title,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        capture_bad_grab_count=capture_bad_grab_count,
+        capture_last_error=capture_last_error,
+        hud_debug_dumped=hud_debug_dumped,
+        hud_fail_streak=hud_fail_streak,
+        schema_version=schema_version,
+    )
 
 
 def _draw_runtime_overlay(
@@ -481,80 +356,17 @@ def _draw_runtime_overlay(
     hud_regions: dict[str, Any],
     transparent_canvas: bool = False,
 ):
-    from megabonk_bot.recognition import draw_recognition_overlay
-
-    hud_overlay_values = {
-        "time": hud_values.get("time"),
-        "kills": hud_values.get("kills"),
-        "lvl": hud_values.get("lvl"),
-        "gold": hud_values.get("gold"),
-        "hp": hud_values.get("hp_ratio"),
-    }
-    base_frame = frame if not transparent_canvas else frame * 0
-    overlay_analysis = analysis
-    if transparent_canvas:
-        overlay_analysis = {
-            "grid": [],
-            "enemies": analysis.get("enemies", []),
-            "interactables": analysis.get("interactables", []),
-            "projectiles": analysis.get("projectiles", []),
-        }
-    canvas = draw_recognition_overlay(
-        base_frame,
-        overlay_analysis,
-        hud_values=hud_overlay_values,
+    return _runtime_draw_runtime_overlay(
+        cv2,
+        frame,
+        analysis,
+        snapshot,
+        mode=mode,
+        action_reason=action_reason,
+        hud_values=hud_values,
         hud_regions=hud_regions,
+        transparent_canvas=transparent_canvas,
     )
-    h, _ = canvas.shape[:2]
-    button_rects = _build_overlay_button_rects(canvas.shape[1])
-    if mode.value == "ACTIVE":
-        toggle_label = "STOP (F8/S)"
-        toggle_color = (20, 40, 160)
-    else:
-        toggle_label = "START (F8/S)"
-        toggle_color = (20, 120, 20)
-    _draw_overlay_button(canvas, button_rects["toggle"], toggle_label, bg_color=toggle_color)
-    _draw_overlay_button(canvas, button_rects["panic"], "PANIC (F12/P)", bg_color=(0, 0, 180))
-
-    hp_pct = (
-        "?"
-        if snapshot.hp_ratio is None
-        else f"{float(snapshot.hp_ratio) * 100.0:.1f}%"
-    )
-    time_fail = hud_values.get("time_fail_reason") or "ok"
-    kills_fail = hud_values.get("kills_fail_reason") or "ok"
-    lines = [
-        f"mode={mode.value}",
-        f"reason={action_reason}",
-        f"hp={hp_pct} lvl={snapshot.lvl} kills={snapshot.kills} time={snapshot.time_s}",
-        f"gold={hud_values.get('gold')}  time_ocr={_format_float(hud_values.get('time_ocr_ms'))}ms ({time_fail})",
-        f"kills_ocr={_format_float(hud_values.get('kills_ocr_ms'))}ms ({kills_fail})",
-        f"enemies={len(snapshot.enemies)} obstacles={len(snapshot.obstacles)} projectiles={len(snapshot.projectiles)}",
-        f"dead={snapshot.is_dead} upgrade={snapshot.is_upgrade} safe_sector={snapshot.safe_sector}",
-        "legend: green=surface blue=obstacle red=enemy orange=interactable cyan=hud_roi",
-        "controls: click START/STOP or PANIC | Q/Esc=quit",
-    ]
-    y = 24
-    for line in lines:
-        cv2.putText(
-            canvas,
-            line,
-            (12, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            2,
-            cv2.LINE_AA,
-        )
-        y += 24
-    cv2.rectangle(
-        canvas,
-        (8, 8),
-        (1060, min(h - 8, 8 + 24 * (len(lines) + 1))),
-        (20, 20, 20) if transparent_canvas else (0, 0, 0),
-        2,
-    )
-    return canvas, button_rects
 
 
 def _parse_boss_schedule(raw_items: list[dict[str, Any]], boss_window_cls) -> list[Any]:
@@ -634,6 +446,10 @@ def run(args) -> None:
     restart_hold_s = float(runtime_cfg["restart_hold_s"])
     restart_wait_timeout_s = float(runtime_cfg["restart_wait_timeout_s"])
     restart_max_attempts = max(1, int(runtime_cfg["restart_max_attempts"]))
+    capture_log_errors = bool(runtime_cfg.get("capture_log_errors", True))
+    event_schema_version = str(
+        runtime_cfg.get("event_schema_version", RUNTIME_EVENT_SCHEMA_VERSION)
+    )
     overlay_enabled = bool(runtime_cfg["overlay_enabled"]) and not args.no_overlay
     overlay_window = str(runtime_cfg["overlay_window"])
     overlay_topmost_enabled = bool(runtime_cfg.get("overlay_topmost", True))
@@ -686,11 +502,10 @@ def run(args) -> None:
     frame_id = 0
     last_event_log_ts = 0.0
     last_upgrade_space_ts = 0.0
-    last_restart_ts = 0.0
-    recovery_started_ts = 0.0
-    recovery_attempts = 0
+    recovery_state = RecoveryState()
     map_scan_tick = 0
     run_started_ts = time.time()
+    capture_warn_limiter = RateLimiter(interval_s=5.0)
     overlay_topmost_applied = False
     overlay_transparent_applied = False
     overlay_borderless_applied = False
@@ -724,12 +539,21 @@ def run(args) -> None:
             if toggle:
                 mode = state_machine.on_events(toggle=True)
                 if mode == BotMode.ACTIVE:
-                    recovery_attempts = 0
-                    recovery_started_ts = 0.0
+                    recovery_state.attempts = 0
+                    recovery_state.started_ts = 0.0
                 else:
                     release_all_keys()
 
             frame = cap.grab()
+            capture_diag = cap.get_capture_diagnostics()
+            capture_bad_grab_count = int(capture_diag.get("bad_grab_count", 0))
+            capture_last_error = capture_diag.get("last_error")
+            maybe_warn_capture_error(
+                capture_last_error=capture_last_error,
+                capture_bad_grab_count=capture_bad_grab_count,
+                limiter=capture_warn_limiter,
+                enabled=capture_log_errors,
+            )
             if frame is None or frame.size == 0:
                 time.sleep(0.05)
                 continue
@@ -785,8 +609,8 @@ def run(args) -> None:
 
             if mode == BotMode.ACTIVE and snapshot.is_dead:
                 mode = state_machine.on_events(dead_detected=True)
-                recovery_started_ts = time.time()
-                recovery_attempts = 0
+                recovery_state.started_ts = time.time()
+                recovery_state.attempts = 0
 
             allow_tab_scan = bool(mvp_cfg.get("allow_map_scan_tab", False)) or bool(
                 max_enabled and max_cfg.get("explore_with_tab", False)
@@ -819,24 +643,25 @@ def run(args) -> None:
             restart_event = None
             if mode == BotMode.RECOVERY:
                 set_move(0)
-                if screen == "RUNNING" and not snapshot.is_dead:
+                now = time.time()
+                decision = decide_recovery_action(
+                    now=now,
+                    screen=screen,
+                    is_dead=snapshot.is_dead,
+                    press_restart=bool(action.press_r),
+                    state=recovery_state,
+                    restart_cooldown_s=restart_cooldown_s,
+                    restart_max_attempts=restart_max_attempts,
+                    restart_wait_timeout_s=restart_wait_timeout_s,
+                )
+                restart_event = decision.restart_event
+                if decision.running_restored:
                     mode = state_machine.on_events(running_restored=True)
-                    recovery_attempts = 0
-                    recovery_started_ts = 0.0
-                    restart_event = "running_restored"
                 else:
-                    now = time.time()
-                    if (
-                        action.press_r
-                        and (now - last_restart_ts) >= restart_cooldown_s
-                        and recovery_attempts < restart_max_attempts
-                    ):
+                    if decision.hold_restart:
                         release_all_keys()
                         hold("r", dt=restart_hold_s)
-                        last_restart_ts = now
-                        recovery_attempts += 1
-                        restart_event = f"hold_r_attempt_{recovery_attempts}"
-                    if (now - recovery_started_ts) >= restart_wait_timeout_s:
+                    if decision.try_fallback_click:
                         clicked = (
                             _try_click_template(
                                 frame,
@@ -859,7 +684,7 @@ def run(args) -> None:
                         )
                         if clicked:
                             restart_event = "fallback_click_menu"
-                            recovery_started_ts = now
+                            recovery_state.started_ts = now
 
             elif mode == BotMode.ACTIVE:
                 apply_cam_yaw(action.yaw, cam_yaw_pixels=cam_yaw_pixels)
@@ -934,6 +759,15 @@ def run(args) -> None:
                     window_title=window_title,
                     frame_width=w,
                     frame_height=h,
+                    capture_bad_grab_count=capture_bad_grab_count,
+                    capture_last_error=(
+                        str(capture_last_error)
+                        if capture_last_error is not None
+                        else None
+                    ),
+                    hud_debug_dumped=bool(hud_values.get("debug_dumped", False)),
+                    hud_fail_streak=int(hud_values.get("hud_fail_streak", 0) or 0),
+                    schema_version=event_schema_version,
                 )
                 logger.log(event)
 

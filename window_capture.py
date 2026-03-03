@@ -276,6 +276,7 @@ class WindowCapture:
     _last_grab_hz: float = 0.0
     _bad_grab_count: int = 0
     _last_focus_ts: float = 0.0
+    _last_grab_error: str | None = None
 
     @classmethod
     def create(cls, window_title: str = "MEGABONK", capture_backend: str = "auto"):
@@ -366,15 +367,24 @@ class WindowCapture:
                         f"Unexpected frame size: {frame.shape} "
                         f"expected ({expected_h}, {expected_w}, 3)"
                     )
+                self._last_grab_error = None
                 return frame
-            except Exception:
+            except Exception as exc:
                 self._bad_grab_count += 1
+                self._last_grab_error = f"{exc.__class__.__name__}: {exc}"
                 self.focus_if_needed(topmost=False, min_interval_s=0.05)
                 time.sleep(base_backoff_s * (2 ** attempt))
                 bbox = self.get_bbox()
                 expected_h = int(bbox["height"])
                 expected_w = int(bbox["width"])
         return None
+
+    def get_capture_diagnostics(self) -> dict[str, object]:
+        return {
+            "bad_grab_count": int(self._bad_grab_count),
+            "last_error": self._last_grab_error,
+            "grab_hz": float(self._last_grab_hz),
+        }
 
     def debug_print(self):
         bbox = self.get_bbox()

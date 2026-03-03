@@ -99,9 +99,13 @@ python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/s
 - `runtime.window_title` — заголовок окна игры.
 - `runtime.step_hz` — частота цикла (стартово 10-12).
 - `runtime.capture_backend` — `auto` / `printwindow` / `mss`.
+- `runtime.capture_log_errors` — логировать ли повторяющиеся ошибки захвата окна.
 - `runtime.templates_dir` — папка шаблонов (обычно `templates`).
 - `runtime.overlay_enabled` — показывать ли окно оверлея.
 - `runtime.overlay_transparent` — прозрачный HUD-оверлей поверх окна игры.
+- `runtime.hud_debug_save_policy` — политика сохранения HUD debug (`startup|on_fail_change|interval|off`).
+- `runtime.hud_debug_min_interval_s` — минимальный интервал между повторными HUD debug-дампами.
+- `runtime.event_schema_version` — версия схемы JSONL (`runtime_events_v2` по умолчанию, доступен `runtime_events_v1`).
 - `hotkeys.toggle_vk` / `hotkeys.panic_vk` — hotkeys (по умолчанию F8/F12).
 
 Если не уверены в значениях, оставьте дефолт и правьте только `window_title`.
@@ -131,6 +135,24 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --w
 
 - `logs/runtime_events.jsonl` — события runtime.
 - `dbg_hud/` — debug-скрины HUD и кропы ROI (в том числе `time/kills/...`).
+
+### Диагностика захвата
+
+- В схеме `runtime_events_v2` в каждом событии есть блок `capture`:
+  - `capture.bad_grab_count`
+  - `capture.last_error`
+- При повторяющихся проблемах захвата runtime пишет rate-limited warning в stdout.
+
+### Политика HUD debug
+
+- `runtime.hud_debug_save_policy: startup` — только стартовый дамп.
+- `runtime.hud_debug_save_policy: on_fail_change` — дамп на первом фейле и при смене причины (рекомендуется).
+- `runtime.hud_debug_save_policy: interval` — дамп при фейле, но не чаще `runtime.hud_debug_min_interval_s`.
+- `runtime.hud_debug_save_policy: off` — отключить автоматические HUD debug-дампы.
+
+В `runtime_events_v2` добавлен блок `hud`:
+- `hud.debug_dumped` — был ли создан debug-дамп на текущем шаге.
+- `hud.fail_streak` — текущая серия OCR-фейлов HUD.
 
 ## 8) Обучение модели (RL)
 
