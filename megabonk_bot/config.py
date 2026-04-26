@@ -26,6 +26,8 @@ class RuntimeConfig:
     overlay_window: str = "Megabonk Runtime Bot"
     overlay_topmost: bool = True
     overlay_transparent: bool = True
+    hud_ocr_every_s: float = 0.8
+    objective_ocr_every_s: float = 1.2
     hud_debug_save_policy: str = "on_fail_change"
     hud_debug_min_interval_s: float = 15.0
     event_log_path: str = "logs/runtime_events.jsonl"
@@ -238,6 +240,8 @@ def _validate_config(data: dict[str, Any]) -> None:
 
     for seconds_key in (
         "event_log_interval_s",
+        "hud_ocr_every_s",
+        "objective_ocr_every_s",
         "hud_debug_min_interval_s",
         "window_focus_interval_s",
         "upgrade_space_cooldown_s",

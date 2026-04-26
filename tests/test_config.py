@@ -9,6 +9,7 @@ def test_load_config_defaults():
     assert config["runtime"]["step_hz"] == 12
     assert config["runtime"]["capture_backend"] == "auto"
     assert config["runtime"]["capture_log_errors"] is True
+    assert config["runtime"]["hud_ocr_every_s"] == 0.8
     assert config["runtime"]["hud_debug_save_policy"] == "on_fail_change"
     assert config["runtime"]["hud_debug_min_interval_s"] == 15.0
     assert config["runtime"]["event_schema_version"] == "runtime_events_v4"

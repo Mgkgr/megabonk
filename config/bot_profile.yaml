@@ -14,6 +14,7 @@ runtime:
   overlay_window: Megabonk Runtime Bot
   overlay_topmost: true
   overlay_transparent: true
+  hud_ocr_every_s: 0.8
   hud_debug_save_policy: on_fail_change
   hud_debug_min_interval_s: 15.0
   event_log_path: logs/runtime_events.jsonl

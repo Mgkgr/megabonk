@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 from megabonk_bot.asset_catalog import CuratedCatalogs, LoadedCatalogEntry
 from megabonk_bot.hud import DEFAULT_HUD_REGIONS
 from megabonk_bot.memory_probe import ProbeResult
-from megabonk_bot.ui_ocr import UiTextDetection, read_objective_ui
+from megabonk_bot.ui_ocr import UiTextDetection
 from megabonk_bot.vision import find_in_region
 from megabonk_bot.world_state import MapPoi, MapState, PlayerPose, TrackedEntity, WorldObject
 
@@ -925,6 +925,7 @@ def analyze_scene(
     catalogs: CuratedCatalogs | None = None,
     regions: dict[str, tuple[int, int, int, int]] | None = None,
     probe_result: ProbeResult | None = None,
+    objective_ui: UiTextDetection | None = None,
     grid_rows: int = 12,
     grid_cols: int = 20,
     enemy_hsv_lower: tuple[int, int, int] = (45, 80, 40),
@@ -965,7 +966,7 @@ def analyze_scene(
         interact_threshold=interact_threshold,
         profile=profile,
     )
-    objective_ui = read_objective_ui(frame_bgr, lexicon=(catalogs.ocr_lexicon if catalogs else None))
+    objective_ui = objective_ui or UiTextDetection()
     map_state_cv = minimap_state_detection(
         frame_bgr,
         templates=templates,

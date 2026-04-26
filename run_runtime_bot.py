@@ -18,6 +18,7 @@ from megabonk_bot.runtime.event_logger import (
     RUNTIME_EVENT_SCHEMA_VERSION,
     build_runtime_event as _build_runtime_event,
 )
+from megabonk_bot.runtime.hud_cache import HudTelemetryCache
 from megabonk_bot.runtime.input_controller import (
     apply_cam_yaw as _runtime_apply_cam_yaw,
     hold as _runtime_hold,
@@ -574,6 +575,7 @@ def run(args) -> None:
     restart_wait_timeout_s = float(runtime_cfg["restart_wait_timeout_s"])
     restart_max_attempts = max(1, int(runtime_cfg["restart_max_attempts"]))
     capture_log_errors = bool(runtime_cfg.get("capture_log_errors", True))
+    hud_ocr_every_s = float(runtime_cfg.get("hud_ocr_every_s", 0.8))
     event_schema_version = str(
         runtime_cfg.get("event_schema_version", RUNTIME_EVENT_SCHEMA_VERSION)
     )
@@ -669,6 +671,12 @@ def run(args) -> None:
         panic_vk=int(hotkey_cfg["panic_vk"]),
     )
     logger = JsonlEventLogger(Path(runtime_cfg["event_log_path"]))
+    hud_cache = HudTelemetryCache(
+        read_hud_telemetry=read_hud_telemetry,
+        regions=regions,
+        interval_s=hud_ocr_every_s,
+    )
+    hud_cache.start()
 
     max_enabled = bool(max_cfg.get("enabled", False))
     onnx_detector = None
@@ -755,6 +763,7 @@ def run(args) -> None:
                         height=int(h),
                     )
                 regions = build_regions(w, h)
+                hud_cache.set_regions(regions)
                 autopilot = AutoPilot(
                     templates=templates,
                     regions=regions,
@@ -766,7 +775,8 @@ def run(args) -> None:
             screen = autopilot.detect_screen(frame)
             is_dead = screen == "DEAD" or (screen != "RUNNING" and is_death_like_frame(frame))
             is_upgrade = _is_upgrade_dialog(frame, templates, regions)
-            hud_values = read_hud_telemetry(frame, regions=regions)
+            hud_cache.submit(frame)
+            hud_values = hud_cache.snapshot()
             probe_result = world_probe.sample(now_ts=time.time())
 
             analysis = analyze_scene(
@@ -1073,6 +1083,7 @@ def run(args) -> None:
 
     finally:
         release_all_keys()
+        hud_cache.close()
         try:
             world_probe.close()
         except Exception:
