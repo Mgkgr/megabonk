@@ -80,6 +80,8 @@
 - Добавлены тесты на резолвинг runtime-ресурсов и CLI-пути шаблонов при явном `--config`, включая запуск вне корня репозитория.
 - Задача 3: синхронный `read_hud_telemetry()` убран из hot loop `run_runtime_bot.py`; HUD OCR теперь обновляется через `HudTelemetryCache` в фоне с настраиваемым интервалом `runtime.hud_ocr_every_s`.
 - Добавлены тесты на кэш HUD telemetry и дефолт нового runtime-параметра `hud_ocr_every_s`.
+- Задача 4: `read_objective_ui()` убран из `analyze_scene()`; objective OCR теперь обновляется через `ObjectiveUiCache` в фоне с настраиваемым интервалом `runtime.objective_ocr_every_s`.
+- Добавлены тесты на objective OCR cache и на то, что `analyze_scene()` использует переданный `objective_ui`, не выполняя inline OCR на каждом кадре.
 - Задача 15: добавлено явное логирование деградаций в `run_runtime_bot.py`, `megabonk_bot/memory_probe.py`, `megabonk_bot/ui_ocr.py`, `megabonk_bot/runtime/event_logger.py`, `megabonk_bot/runtime/input_controller.py`.
 - Сужена обработка некорректного `runtime.state` до `ValueError`, добавлены fallback-логи для overlay callback, overlay bbox и закрытия `world_probe`.
 - Добавлены тесты на логирование ошибок OCR, memory probe, закрытия event log и release key-path.

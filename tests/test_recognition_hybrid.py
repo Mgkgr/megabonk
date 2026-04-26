@@ -9,6 +9,7 @@ from megabonk_bot.asset_catalog import load_curated_catalogs
 from megabonk_bot.memory_probe import ProbeResult
 from megabonk_bot.recognition import analyze_scene
 from megabonk_bot.regions import build_regions
+from megabonk_bot.ui_ocr import UiTextDetection
 
 
 def _write_image(path, image):
@@ -252,6 +253,31 @@ def test_analyze_scene_splits_projectiles_and_hazards(tmp_path):
 
     assert any(item.entity_id == "projectile_bloodmagic" for item in analysis["projectile_classes"])
     assert any(item.entity_id == "ghostboss_spike" for item in analysis["hazards"])
+
+
+def test_analyze_scene_uses_supplied_objective_ui_without_inline_ocr():
+    frame = np.zeros((160, 220, 3), dtype=np.uint8)
+    supplied_objective = UiTextDetection(
+        text="Escort the cart",
+        normalized="escort_the_cart",
+        confidence=88.0,
+        region=(10, 10, 100, 20),
+        source="objective_cache",
+    )
+
+    analysis = analyze_scene(
+        frame,
+        regions=build_regions(220, 160),
+        probe_result=ProbeResult(status="disabled", ts=1.0),
+        objective_ui=supplied_objective,
+        enemy_hsv_lower=(35, 80, 80),
+        enemy_hsv_upper=(95, 255, 255),
+        enemy_min_area=40.0,
+    )
+
+    assert analysis["objective_ui"] == supplied_objective
+    assert analysis["map_state"].objective == "escort_the_cart"
+    assert analysis["detection_sources"]["objective"] == "objective_cache"
 
 
 def test_finalboss_profile_filters_loot_world_objects(tmp_path):

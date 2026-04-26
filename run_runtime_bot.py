@@ -19,6 +19,7 @@ from megabonk_bot.runtime.event_logger import (
     build_runtime_event as _build_runtime_event,
 )
 from megabonk_bot.runtime.hud_cache import HudTelemetryCache
+from megabonk_bot.runtime.objective_cache import ObjectiveUiCache
 from megabonk_bot.runtime.input_controller import (
     apply_cam_yaw as _runtime_apply_cam_yaw,
     hold as _runtime_hold,
@@ -546,6 +547,7 @@ def run(args) -> None:
     from megabonk_bot.runtime_logic import BotMode, build_scene_snapshot
     from megabonk_bot.runtime_state import RuntimeStateMachine
     from megabonk_bot.templates import load_templates
+    from megabonk_bot.ui_ocr import read_objective_ui
     from megabonk_bot.world_state import TrackedEntity
     from window_capture import WindowCapture
 
@@ -576,6 +578,7 @@ def run(args) -> None:
     restart_max_attempts = max(1, int(runtime_cfg["restart_max_attempts"]))
     capture_log_errors = bool(runtime_cfg.get("capture_log_errors", True))
     hud_ocr_every_s = float(runtime_cfg.get("hud_ocr_every_s", 0.8))
+    objective_ocr_every_s = float(runtime_cfg.get("objective_ocr_every_s", 1.2))
     event_schema_version = str(
         runtime_cfg.get("event_schema_version", RUNTIME_EVENT_SCHEMA_VERSION)
     )
@@ -677,6 +680,12 @@ def run(args) -> None:
         interval_s=hud_ocr_every_s,
     )
     hud_cache.start()
+    objective_cache = ObjectiveUiCache(
+        read_objective_ui=read_objective_ui,
+        lexicon=catalogs.ocr_lexicon if catalogs else None,
+        interval_s=objective_ocr_every_s,
+    )
+    objective_cache.start()
 
     max_enabled = bool(max_cfg.get("enabled", False))
     onnx_detector = None
@@ -776,7 +785,9 @@ def run(args) -> None:
             is_dead = screen == "DEAD" or (screen != "RUNNING" and is_death_like_frame(frame))
             is_upgrade = _is_upgrade_dialog(frame, templates, regions)
             hud_cache.submit(frame)
+            objective_cache.submit(frame)
             hud_values = hud_cache.snapshot()
+            objective_ui = objective_cache.snapshot()
             probe_result = world_probe.sample(now_ts=time.time())
 
             analysis = analyze_scene(
@@ -785,6 +796,7 @@ def run(args) -> None:
                 catalogs=catalogs,
                 regions=regions,
                 probe_result=probe_result,
+                objective_ui=objective_ui,
                 grid_rows=int(detect_cfg["grid_rows"]),
                 grid_cols=int(detect_cfg["grid_cols"]),
                 enemy_hsv_lower=tuple(detect_cfg["enemy_hsv_lower"]),
@@ -1083,6 +1095,7 @@ def run(args) -> None:
 
     finally:
         release_all_keys()
+        objective_cache.close()
         hud_cache.close()
         try:
             world_probe.close()
