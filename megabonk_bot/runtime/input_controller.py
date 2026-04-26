@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import time
+
+LOGGER = logging.getLogger(__name__)
 
 MOVE_MAPPING = {
     0: [],
@@ -57,11 +60,14 @@ def set_move(di, dir_id: int) -> None:
 
 
 def release_all_keys(di) -> None:
+    failed_keys = []
     for key in RELEASE_KEYS:
         try:
             di.keyUp(key)
-        except Exception:
-            pass
+        except Exception as exc:
+            failed_keys.append(f"{key}: {exc.__class__.__name__}: {exc}")
+    if failed_keys:
+        LOGGER.warning("Failed to release keys cleanly: %s", ", ".join(failed_keys))
 
 
 def apply_cam_yaw(di, yaw_id: int, cam_yaw_pixels: int) -> None:

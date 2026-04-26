@@ -4,6 +4,7 @@ enable_dpi_awareness()
 
 import argparse
 import ctypes
+import logging
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -51,6 +52,8 @@ WS_THICKFRAME = 0x00040000
 WS_MINIMIZE = 0x20000000
 WS_MAXIMIZE = 0x01000000
 WS_SYSMENU = 0x00080000
+
+LOGGER = logging.getLogger(__name__)
 
 
 def key_on(key: str) -> None:
@@ -637,7 +640,8 @@ def run(args) -> None:
 
     try:
         mode = BotMode(str(runtime_cfg.get("state", "OFF")).upper())
-    except Exception:
+    except ValueError:
+        LOGGER.warning("Invalid runtime state %r, falling back to OFF", runtime_cfg.get("state"))
         mode = BotMode.OFF
     state_machine = RuntimeStateMachine(mode=mode)
 
@@ -652,6 +656,8 @@ def run(args) -> None:
     overlay_transparent_applied = False
     overlay_borderless_applied = False
     overlay_mouse_callback_set = False
+    overlay_mouse_callback_failed = False
+    overlay_bbox_error_logged = False
     overlay_controls = {"toggle": False, "panic": False, "rects": {}}
     pending_toggle = False
     pending_panic = False
@@ -975,16 +981,24 @@ def run(args) -> None:
                 )
                 overlay_controls["rects"] = button_rects
                 cv2.imshow(overlay_window, overlay)
-                if not overlay_mouse_callback_set:
+                if not overlay_mouse_callback_set and not overlay_mouse_callback_failed:
                     try:
                         cv2.setMouseCallback(overlay_window, _on_overlay_mouse, overlay_controls)
                         overlay_mouse_callback_set = True
                     except Exception:
+                        LOGGER.warning("Failed to bind overlay mouse callback", exc_info=True)
+                        overlay_mouse_callback_failed = True
                         overlay_mouse_callback_set = False
                 if overlay_transparent:
                     try:
                         game_bbox = cap.get_bbox()
                     except Exception:
+                        if not overlay_bbox_error_logged:
+                            LOGGER.warning(
+                                "Failed to read game window bbox for overlay sync; using capture bbox fallback",
+                                exc_info=True,
+                            )
+                            overlay_bbox_error_logged = True
                         game_bbox = bbox
                     _resize_overlay_window(
                         overlay_window,
@@ -1023,7 +1037,7 @@ def run(args) -> None:
         try:
             world_probe.close()
         except Exception:
-            pass
+            LOGGER.warning("Failed to close world probe cleanly", exc_info=True)
         logger.close()
         if overlay_enabled:
             cv2.destroyAllWindows()

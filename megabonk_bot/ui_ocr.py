@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from megabonk_bot.asset_catalog import OcrLexicon
+
+LOGGER = logging.getLogger(__name__)
+_UI_OCR_WARNING_INTERVAL_S = 60.0
+_UI_OCR_LAST_WARNING_AT = 0.0
 
 
 @dataclass(frozen=True)
@@ -14,6 +20,14 @@ class UiTextDetection:
     confidence: float = 0.0
     region: tuple[int, int, int, int] | None = None
     source: str = "none"
+
+
+def _warn_ui_ocr_degraded(message: str) -> None:
+    global _UI_OCR_LAST_WARNING_AT
+    now = time.monotonic()
+    if (now - _UI_OCR_LAST_WARNING_AT) >= _UI_OCR_WARNING_INTERVAL_S:
+        LOGGER.warning(message, exc_info=True)
+        _UI_OCR_LAST_WARNING_AT = now
 
 
 def _normalize_free_text(text: str) -> str:
@@ -91,12 +105,14 @@ def read_objective_ui(frame_bgr, *, lexicon: OcrLexicon | None = None) -> UiText
     try:
         from megabonk_bot.hud import _best_ocr
     except Exception:
+        _warn_ui_ocr_degraded("Objective UI OCR backend is unavailable")
         return UiTextDetection(region=region)
 
     whitelist = lexicon_whitelist(lexicon)
     try:
         text, conf = _best_ocr(roi, whitelist=whitelist, psm=6, target_conf=45.0)
     except Exception:
+        _warn_ui_ocr_degraded("Objective UI OCR failed")
         return UiTextDetection(region=region)
     if text is None or conf is None:
         return UiTextDetection(region=region)

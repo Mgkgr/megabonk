@@ -72,3 +72,10 @@
 ### 15. Пересмотреть широкие `except Exception` и немые подавления ошибок
 - Что сделать: оставить подавление только там, где оно действительно допустимо, и улучшить видимость деградаций в логах.
 - Критерий готовности: ошибки управления, OCR, захвата и probe либо логируются, либо обрабатываются явно.
+
+## Changelog
+
+### 2026-04-26
+- Задача 15: добавлено явное логирование деградаций в `run_runtime_bot.py`, `megabonk_bot/memory_probe.py`, `megabonk_bot/ui_ocr.py`, `megabonk_bot/runtime/event_logger.py`, `megabonk_bot/runtime/input_controller.py`.
+- Сужена обработка некорректного `runtime.state` до `ValueError`, добавлены fallback-логи для overlay callback, overlay bbox и закрытия `world_probe`.
+- Добавлены тесты на логирование ошибок OCR, memory probe, закрытия event log и release key-path.

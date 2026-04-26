@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import struct
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class ExternalProcessProbe(WorldStateProbe):
         self._gameassembly_module = None
         self._last_poll_ts = 0.0
         self._last_result = ProbeResult(status="cold_start", ts=0.0)
+        self._last_logged_error = None
         try:
             import ctypes
             from ctypes import wintypes
@@ -70,7 +74,8 @@ class ExternalProcessProbe(WorldStateProbe):
             self._wintypes = wintypes
             self._kernel32 = ctypes.windll.kernel32
             self._user32 = ctypes.windll.user32
-        except Exception:
+        except (ImportError, AttributeError, OSError):
+            LOGGER.warning("External memory probe is unavailable on this platform", exc_info=True)
             self._ctypes = None
             self._wintypes = None
             self._kernel32 = None
@@ -81,7 +86,7 @@ class ExternalProcessProbe(WorldStateProbe):
             try:
                 self._kernel32.CloseHandle(self._handle)
             except Exception:
-                pass
+                LOGGER.warning("Failed to close memory probe process handle", exc_info=True)
         self._handle = None
 
     def sample(self, now_ts: float | None = None) -> ProbeResult:
@@ -153,8 +158,13 @@ class ExternalProcessProbe(WorldStateProbe):
                 ts=now_ts,
                 details={"pid": self._pid, **{k: v for k, v in values.items() if k.endswith("_error")}},
             )
+            self._last_logged_error = None
             return self._last_result
         except Exception as exc:
+            error_signature = f"{exc.__class__.__name__}: {exc}"
+            if error_signature != self._last_logged_error:
+                LOGGER.warning("Memory probe sampling degraded", exc_info=True)
+                self._last_logged_error = error_signature
             self._last_result = ProbeResult(
                 status="degraded_error",
                 ts=now_ts,

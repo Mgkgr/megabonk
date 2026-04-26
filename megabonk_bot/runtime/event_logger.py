@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
 
 RUNTIME_EVENT_SCHEMA_VERSION = "runtime_events_v4"
+LOGGER = logging.getLogger(__name__)
 
 
 class JsonlEventLogger:
@@ -23,7 +25,7 @@ class JsonlEventLogger:
         try:
             self._fp.close()
         except Exception:
-            pass
+            LOGGER.warning("Failed to close runtime event log %s", self.path, exc_info=True)
 
 
 def _serialize_detection_list(items) -> list[dict[str, Any]]:
