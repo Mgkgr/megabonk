@@ -1,0 +1,418 @@
+[
+  {
+    "entity_id": "tome",
+    "kind": "world_object",
+    "display_name": "Tome",
+    "aliases": ["tome", "foliant", "book", "holybook", "itemholybook"],
+    "preview_relpath": "tomes/LuckTome.png",
+    "template_names": ["tpl_foliant_bottom1", "tpl_foliant_bottom2", "tpl_foliant_bottom3", "tpl_blood_tome"],
+    "poi_type": "loot",
+    "metadata": {
+      "family": "tome",
+      "variant": "generic",
+      "scene_tags": ["generatedmap"],
+      "mesh_relpath": "meshes/Book.obj"
+    }
+  },
+  {
+    "entity_id": "interactable_portal",
+    "kind": "poi",
+    "display_name": "Portal",
+    "aliases": ["portal", "bossportal", "spawnportal", "interactableportal", "a_portalopen"],
+    "preview_relpath": "enemies/BossPortalNormal.png",
+    "poi_type": "exit",
+    "metadata": {
+      "family": "portal",
+      "variant": "normal",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "portal",
+      "mesh_relpath": "meshes/BossPortal.obj",
+      "minimap_icon_relpath": "minimap_icons/portal.png",
+      "silhouette_relpath": "silhouettes/BossPortal.png"
+    }
+  },
+  {
+    "entity_id": "interactable_portal_final",
+    "kind": "poi",
+    "display_name": "PortalFinal",
+    "aliases": ["portalfinal", "interactableportalfinal", "bossportalfinal", "finalbossobjective"],
+    "preview_relpath": "enemies/BossPortalFinal.png",
+    "poi_type": "exit",
+    "metadata": {
+      "family": "portal",
+      "variant": "final",
+      "scene_tags": ["finalbossmap", "boss"],
+      "icon_id": "portal",
+      "mesh_relpath": "meshes/BossPortal.obj",
+      "minimap_icon_relpath": "minimap_icons/portal.png",
+      "silhouette_relpath": "silhouettes/BossPortal.png"
+    }
+  },
+  {
+    "entity_id": "objective_marker",
+    "kind": "poi",
+    "display_name": "Objective",
+    "aliases": ["objective", "objectivearrow", "firstobjective", "animateobjective", "completecurrentobjective"],
+    "preview_relpath": "enemies/psd_boss.png",
+    "poi_type": "objective",
+    "metadata": {
+      "family": "objective",
+      "variant": "default",
+      "scene_tags": ["generatedmap", "finalbossmap"],
+      "icon_id": "objective",
+      "minimap_icon_relpath": "minimap_icons/objective.png"
+    }
+  },
+  {
+    "entity_id": "boss_marker",
+    "kind": "poi",
+    "display_name": "BossMarker",
+    "aliases": ["boss", "bossmarker", "anyboss", "bossboss", "bossminimum", "bossspawned", "checkspawnboss"],
+    "preview_relpath": "enemies/psd_boss.png",
+    "poi_type": "boss",
+    "metadata": {
+      "family": "boss_marker",
+      "variant": "default",
+      "scene_tags": ["generatedmap", "finalbossmap", "boss"],
+      "icon_id": "boss_marker",
+      "minimap_icon_relpath": "minimap_icons/boss_marker.png"
+    }
+  },
+  {
+    "entity_id": "interactable_crypt",
+    "kind": "poi",
+    "display_name": "CryptEntrance",
+    "aliases": ["interactablecrypt", "crypt", "bosscrypt", "challengewinconditionescapefirstcrypt"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "transition",
+    "metadata": {
+      "family": "crypt",
+      "variant": "enter",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "crypt_exit",
+      "minimap_icon_relpath": "minimap_icons/crypt_exit.png"
+    }
+  },
+  {
+    "entity_id": "interactable_crypt_leave",
+    "kind": "poi",
+    "display_name": "CryptExit",
+    "aliases": ["interactablecryptleave", "cryptexit", "leavecrypt"],
+    "preview_relpath": "enemies/BossPortalFinalBottom.png",
+    "poi_type": "transition",
+    "metadata": {
+      "family": "crypt",
+      "variant": "leave",
+      "scene_tags": ["crypt"],
+      "icon_id": "crypt_exit",
+      "minimap_icon_relpath": "minimap_icons/crypt_exit.png"
+    }
+  },
+  {
+    "entity_id": "crypt_key",
+    "kind": "world_object",
+    "display_name": "CryptKey",
+    "aliases": ["key", "cryptkey", "graveyardcryptkeys", "keypickupmonke"],
+    "preview_relpath": "tomes/GoldenTome.png",
+    "poi_type": "key",
+    "metadata": {
+      "family": "key",
+      "variant": "crypt",
+      "scene_tags": ["generatedmap", "crypt"],
+      "icon_id": "key",
+      "minimap_icon_relpath": "minimap_icons/key.png"
+    }
+  },
+  {
+    "entity_id": "interactable_cage",
+    "kind": "world_object",
+    "display_name": "Cage",
+    "aliases": ["interactablecage", "monkecage"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "interaction",
+    "metadata": {
+      "family": "cage",
+      "variant": "default",
+      "scene_tags": ["generatedmap"]
+    }
+  },
+  {
+    "entity_id": "interactable_cage_key",
+    "kind": "world_object",
+    "display_name": "CageKey",
+    "aliases": ["interactablecagekey", "cagekey"],
+    "preview_relpath": "tomes/SilverTome.png",
+    "poi_type": "key",
+    "metadata": {
+      "family": "key",
+      "variant": "cage",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "key",
+      "minimap_icon_relpath": "minimap_icons/key.png"
+    }
+  },
+  {
+    "entity_id": "challenge_shrine",
+    "kind": "world_object",
+    "display_name": "ChallengeShrine",
+    "aliases": ["challengeshrine", "challengemodifier", "onchallengeshrinecompleted"],
+    "preview_relpath": "tomes/ChaosTome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "challenge",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "balance_shrine",
+    "kind": "world_object",
+    "display_name": "BalanceShrine",
+    "aliases": ["balanceshrine", "getbalanceshrineoffers", "statchangebalanceshrine", "shrine_balance"],
+    "preview_relpath": "tomes/Balance_Tome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "balance",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "cursed_shrine",
+    "kind": "world_object",
+    "display_name": "CursedShrine",
+    "aliases": ["cursedshrine", "shrine_cursed", "curse"],
+    "preview_relpath": "tomes/CursedTome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "cursed",
+      "scene_tags": ["generatedmap", "crypt"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "greed_shrine",
+    "kind": "world_object",
+    "display_name": "GreedShrine",
+    "aliases": ["greedshrine", "greedshrinespawns", "shrine_greedy_gold"],
+    "preview_relpath": "tomes/GoldenTome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "greed",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "magnet_shrine",
+    "kind": "world_object",
+    "display_name": "MagnetShrine",
+    "aliases": ["magnetshrine", "shrine_magnet"],
+    "preview_relpath": "tomes/AttractionTome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "magnet",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "moai_shrine",
+    "kind": "world_object",
+    "display_name": "MoaiShrine",
+    "aliases": ["interactableshrinemoai", "moai", "getmoaitext", "header_moai", "moai_"],
+    "preview_relpath": "tomes/SilverTome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "moai",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "charge_shrine",
+    "kind": "world_object",
+    "display_name": "ChargeShrine",
+    "aliases": ["chargeshrine", "onchargeshrinecharged", "onchargeshrinespawned", "shrine_charge_upgrade"],
+    "preview_relpath": "tomes/CooldownTome.png",
+    "poi_type": "buff",
+    "metadata": {
+      "family": "shrine",
+      "variant": "charge",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "shrine",
+      "minimap_icon_relpath": "minimap_icons/shrine.png"
+    }
+  },
+  {
+    "entity_id": "chest_normal",
+    "kind": "world_object",
+    "display_name": "ChestNormal",
+    "aliases": ["chest", "chestnormal", "checkchestspawn", "openchestnormal"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "loot",
+    "metadata": {
+      "family": "chest",
+      "variant": "normal",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "chest",
+      "minimap_icon_relpath": "minimap_icons/chest.png"
+    }
+  },
+  {
+    "entity_id": "chest_free",
+    "kind": "world_object",
+    "display_name": "ChestFree",
+    "aliases": ["chestfree", "chestfreecrypt", "freecrypt"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "loot",
+    "metadata": {
+      "family": "chest",
+      "variant": "free",
+      "scene_tags": ["generatedmap"],
+      "icon_id": "chest",
+      "minimap_icon_relpath": "minimap_icons/chest.png"
+    }
+  },
+  {
+    "entity_id": "chest_ghost",
+    "kind": "world_object",
+    "display_name": "ChestGhost",
+    "aliases": ["chestghost", "openchestghost"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "loot",
+    "metadata": {
+      "family": "chest",
+      "variant": "ghost",
+      "scene_tags": ["crypt"],
+      "icon_id": "chest",
+      "minimap_icon_relpath": "minimap_icons/chest.png"
+    }
+  },
+  {
+    "entity_id": "chest_evil",
+    "kind": "world_object",
+    "display_name": "ChestEvil",
+    "aliases": ["chestevil", "encountertochesttype"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "loot",
+    "metadata": {
+      "family": "chest",
+      "variant": "evil",
+      "scene_tags": ["generatedmap", "crypt"],
+      "icon_id": "chest",
+      "minimap_icon_relpath": "minimap_icons/chest.png"
+    }
+  },
+  {
+    "entity_id": "chest_free_crypt",
+    "kind": "world_object",
+    "display_name": "ChestFreeCrypt",
+    "aliases": ["chestfreecrypt", "chestscrypt"],
+    "preview_relpath": "enemies/BossPortalNormalBottom.png",
+    "poi_type": "loot",
+    "metadata": {
+      "family": "chest",
+      "variant": "free_crypt",
+      "scene_tags": ["crypt"],
+      "icon_id": "chest",
+      "minimap_icon_relpath": "minimap_icons/chest.png"
+    }
+  },
+  {
+    "entity_id": "graveyard_boss_portal",
+    "kind": "poi",
+    "display_name": "GraveyardBossPortal",
+    "aliases": ["graveyardbossportal"],
+    "preview_relpath": "enemies/BossPortalFinal.png",
+    "poi_type": "boss",
+    "metadata": {
+      "family": "portal",
+      "variant": "graveyard_boss",
+      "scene_tags": ["generatedmap", "boss"],
+      "icon_id": "boss_marker",
+      "mesh_relpath": "meshes/BossPortal.obj",
+      "minimap_icon_relpath": "minimap_icons/boss_marker.png",
+      "silhouette_relpath": "silhouettes/BossPortal.png"
+    }
+  },
+  {
+    "entity_id": "graveyard_boss_metal_gate",
+    "kind": "world_object",
+    "display_name": "GraveyardBossMetalGate",
+    "aliases": ["graveyardbossmetalgate"],
+    "preview_relpath": "enemies/BossPortalFinalBottom.png",
+    "poi_type": "transition",
+    "metadata": {
+      "family": "gate",
+      "variant": "graveyard_boss",
+      "scene_tags": ["generatedmap", "boss"]
+    }
+  },
+  {
+    "entity_id": "ghost_grave",
+    "kind": "world_object",
+    "display_name": "GhostGrave",
+    "aliases": ["ghostgrave", "fbx_ghostgrave_emission", "t_ghostgrave1", "t_ghostgrave2", "t_ghostgrave3", "t_ghostgrave4"],
+    "preview_relpath": "enemies/FBX_GhostGrave_Emission.png",
+    "poi_type": "interaction",
+    "metadata": {
+      "family": "grave",
+      "variant": "ghost",
+      "scene_tags": ["crypt", "generatedmap"]
+    }
+  },
+  {
+    "entity_id": "interactable_gravestone",
+    "kind": "world_object",
+    "display_name": "Gravestone",
+    "aliases": ["interactablegravestone", "gravestone"],
+    "preview_relpath": "enemies/t_ghostGrave1.png",
+    "poi_type": "interaction",
+    "metadata": {
+      "family": "grave",
+      "variant": "gravestone",
+      "scene_tags": ["crypt", "generatedmap"]
+    }
+  },
+  {
+    "entity_id": "interactable_desert_grave",
+    "kind": "world_object",
+    "display_name": "DesertGrave",
+    "aliases": ["interactabledesertgrave", "desertgrave"],
+    "preview_relpath": "enemies/t_ghostGrave2.png",
+    "poi_type": "interaction",
+    "metadata": {
+      "family": "grave",
+      "variant": "desert",
+      "scene_tags": ["generatedmap"]
+    }
+  },
+  {
+    "entity_id": "boss_lamp",
+    "kind": "world_object",
+    "display_name": "BossLamp",
+    "aliases": ["bosslamp", "isbosslamp"],
+    "preview_relpath": "enemies/psd_boss.png",
+    "poi_type": "boss",
+    "metadata": {
+      "family": "boss_lamp",
+      "variant": "default",
+      "scene_tags": ["boss", "finalbossmap"],
+      "mesh_relpath": "meshes/BossLamp.obj",
+      "silhouette_relpath": "silhouettes/BossLamp.png"
+    }
+  }
+]

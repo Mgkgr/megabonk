@@ -89,3 +89,81 @@ def test_choose_mvp_action_never_opens_chest():
     assert action.open_chest is False
     assert action.press_space is False
     assert action.reason == "EVADE_ENEMY"
+
+
+def test_choose_mvp_action_prefers_projectile_evasion():
+    analysis = {
+        "enemies": [],
+        "grid": [],
+        "interactables": [],
+        "projectiles": [_box("projectile", (80, 40, 60, 60), 0.95)],
+        "enemy_classes": [],
+        "world_objects": [],
+    }
+    snapshot = build_scene_snapshot(
+        frame_id=4,
+        ts=4.0,
+        frame_width=200,
+        frame_height=120,
+        analysis=analysis,
+        hud_values={},
+        is_dead=False,
+        is_upgrade=False,
+    )
+    action = choose_mvp_action(snapshot, mode=BotMode.ACTIVE, heuristic_action=None)
+    assert action.reason == "evade_center_danger"
+    assert action.jump == 0
+    assert action.press_space is False
+
+
+def test_build_scene_snapshot_keeps_projectile_classes_and_hazards():
+    analysis = {
+        "enemies": [],
+        "grid": [],
+        "interactables": [],
+        "projectiles": [],
+        "projectile_classes": [
+            SimpleNamespace(
+                label="ProjectileBloodMagic",
+                rect=(70, 30, 40, 40),
+                score=0.92,
+                source="asset_catalog",
+                entity_id="projectile_bloodmagic",
+                threat_tier=2.6,
+                family="projectile_bloodmagic",
+                variant="default",
+                metadata={"damage_type": "blood"},
+            )
+        ],
+        "hazards": [
+            SimpleNamespace(
+                label="GhostBossSpike",
+                rect=(80, 55, 40, 50),
+                score=0.95,
+                source="asset_catalog",
+                entity_id="ghostboss_spike",
+                poi_type=None,
+                family="ghostboss_spike",
+                variant="default",
+                hazard_kind="spike",
+                icon_id=None,
+                metadata={"hazard_kind": "spike"},
+            )
+        ],
+    }
+    snapshot = build_scene_snapshot(
+        frame_id=5,
+        ts=5.0,
+        frame_width=200,
+        frame_height=120,
+        analysis=analysis,
+        hud_values={},
+        is_dead=False,
+        is_upgrade=False,
+    )
+
+    assert snapshot.projectile_classes[0].entity_id == "projectile_bloodmagic"
+    assert snapshot.hazards[0].hazard_kind == "spike"
+
+    action = choose_mvp_action(snapshot, mode=BotMode.ACTIVE, heuristic_action=None)
+    assert action.reason == "evade_center_danger"

@@ -10,6 +10,21 @@ def point_in_rect(x: int, y: int, rect: Optional[tuple[int, int, int, int]]) -> 
     return rx <= x <= (rx + rw) and ry <= y <= (ry + rh)
 
 
+def handle_overlay_mouse_event(cv2, event: int, x: int, y: int, state: Any) -> None:
+    if not isinstance(state, dict):
+        return
+    if event not in {
+        getattr(cv2, "EVENT_LBUTTONDOWN", -1),
+        getattr(cv2, "EVENT_LBUTTONUP", -2),
+    }:
+        return
+    rects = state.get("rects", {})
+    if point_in_rect(int(x), int(y), rects.get("toggle")):
+        state["toggle"] = True
+    elif point_in_rect(int(x), int(y), rects.get("panic")):
+        state["panic"] = True
+
+
 def build_overlay_button_rects(frame_w: int) -> dict[str, tuple[int, int, int, int]]:
     button_w = 170
     button_h = 34
@@ -64,6 +79,7 @@ def draw_runtime_overlay(
     action_reason: str,
     hud_values: dict[str, Any],
     hud_regions: dict[str, Any],
+    navigation_context=None,
     transparent_canvas: bool = False,
 ):
     from megabonk_bot.recognition import draw_recognition_overlay
@@ -81,8 +97,12 @@ def draw_runtime_overlay(
         overlay_analysis = {
             "grid": [],
             "enemies": analysis.get("enemies", []),
+            "enemy_classes": analysis.get("enemy_classes", []),
             "interactables": analysis.get("interactables", []),
             "projectiles": analysis.get("projectiles", []),
+            "projectile_classes": analysis.get("projectile_classes", []),
+            "world_objects": analysis.get("world_objects", []),
+            "hazards": analysis.get("hazards", []),
         }
     canvas = draw_recognition_overlay(
         base_frame,
@@ -106,17 +126,50 @@ def draw_runtime_overlay(
         if snapshot.hp_ratio is None
         else f"{float(snapshot.hp_ratio) * 100.0:.1f}%"
     )
+    map_state = getattr(snapshot, "map_state", None)
+    player_pose = getattr(snapshot, "player_pose", None)
+    map_open = getattr(map_state, "map_open", False) if map_state is not None else False
+    minimap_visible = getattr(map_state, "minimap_visible", False) if map_state is not None else False
+    player_norm = getattr(player_pose, "map_norm", None) if player_pose is not None else None
+    player_world = getattr(player_pose, "world_pos", None) if player_pose is not None else None
+    enemy_classes = getattr(snapshot, "enemy_classes", [])
+    projectile_classes = getattr(snapshot, "projectile_classes", [])
+    world_objects = getattr(snapshot, "world_objects", [])
+    hazards = getattr(snapshot, "hazards", [])
+    scene_id = getattr(map_state, "scene_id", None) if map_state is not None else None
+    objective = getattr(map_state, "objective", None) if map_state is not None else None
+    is_crypt = getattr(map_state, "is_crypt", None) if map_state is not None else None
+    map_pos = "?"
+    if player_norm is not None:
+        map_pos = f"{player_norm[0]:.2f},{player_norm[1]:.2f}"
+    world_pos = "?"
+    if player_world is not None:
+        world_pos = f"{player_world[0]:.1f},{player_world[1]:.1f},{player_world[2]:.1f}"
+    detection_sources = getattr(snapshot, "detection_sources", {}) or {}
     time_fail = hud_values.get("time_fail_reason") or "ok"
     kills_fail = hud_values.get("kills_fail_reason") or "ok"
+    nav_terrain = getattr(navigation_context, "terrain_kind", "unknown")
+    nav_escape = getattr(navigation_context, "escape_lane", None) or "none"
+    nav_conf = format_float(getattr(navigation_context, "nav_confidence", None), digits=2)
+    nav_drop = format_float(getattr(navigation_context, "drop_risk", None), digits=2)
+    nav_jump_gate = getattr(navigation_context, "jump_gate", "not_evaluated")
+    nav_slide_gate = getattr(navigation_context, "slide_gate", "not_evaluated")
+    nav_slope_source = getattr(navigation_context, "slope_source", "none")
+    nav_slope_delta = format_float(getattr(navigation_context, "slope_delta_z", None), digits=3)
     lines = [
         f"mode={mode.value}",
         f"reason={action_reason}",
         f"hp={hp_pct} lvl={snapshot.lvl} kills={snapshot.kills} time={snapshot.time_s}",
         f"gold={hud_values.get('gold')}  time_ocr={format_float(hud_values.get('time_ocr_ms'))}ms ({time_fail})",
         f"kills_ocr={format_float(hud_values.get('kills_ocr_ms'))}ms ({kills_fail})",
-        f"enemies={len(snapshot.enemies)} obstacles={len(snapshot.obstacles)} projectiles={len(snapshot.projectiles)}",
+        f"nav terrain={nav_terrain} escape={nav_escape} conf={nav_conf} drop={nav_drop}",
+        f"nav jump={nav_jump_gate} slide={nav_slide_gate} slope={nav_slope_source}:{nav_slope_delta}",
+        f"enemies={len(snapshot.enemies)} enemy_classes={len(enemy_classes)} projectiles={len(snapshot.projectiles)} projectile_classes={len(projectile_classes)} world={len(world_objects)} hazards={len(hazards)}",
         f"dead={snapshot.is_dead} upgrade={snapshot.is_upgrade} safe_sector={snapshot.safe_sector}",
-        "legend: green=surface blue=obstacle red=enemy orange=interactable cyan=hud_roi",
+        f"scene={scene_id} crypt={is_crypt} objective={objective}",
+        f"map_open={map_open} minimap={minimap_visible} map_pos={map_pos} world_pos={world_pos}",
+        f"probe={getattr(snapshot, 'memory_probe_status', 'disabled')} sources={detection_sources}",
+        "legend: green=surface blue=obstacle red=enemy magenta=projectile orange=world cyan=hazard yellow=hud_roi",
         "controls: click START/STOP or PANIC | Q/Esc=quit",
     ]
     y = 24
@@ -135,7 +188,7 @@ def draw_runtime_overlay(
     cv2.rectangle(
         canvas,
         (8, 8),
-        (1060, min(h - 8, 8 + 24 * (len(lines) + 1))),
+        (1240, min(h - 8, 8 + 24 * (len(lines) + 1))),
         (20, 20, 20) if transparent_canvas else (0, 0, 0),
         2,
     )

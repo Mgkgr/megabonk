@@ -1,0 +1,64 @@
+{
+  "game_data_dir": "G:\\SteamLibrary\\steamapps\\common\\Megabonk\\Megabonk_Data",
+  "output_dir": "D:\\Projects\\megabonk_bot\\art_refs\\megabonk_unity_extracts",
+  "patterns": [
+    "Minimap",
+    "Objective",
+    "Interactable",
+    "Projectile",
+    "Chest",
+    "Shrine",
+    "Crypt",
+    "GhostGrave",
+    "Spike",
+    "Boss",
+    "Portal",
+    "Key",
+    "t_",
+    "FBX_"
+  ],
+  "extracted_assets": [],
+  "metadata_terms_count": 2897,
+  "catalog_terms_count": 75,
+  "ocr_lexicon": {
+    "tokens_count": 2508,
+    "phrases_count": 2653
+  },
+  "generated_icon_files": [
+    "minimap_icons/boss_marker.png",
+    "minimap_icons/portal.png",
+    "minimap_icons/shrine.png",
+    "minimap_icons/chest.png",
+    "minimap_icons/key.png",
+    "minimap_icons/objective.png",
+    "minimap_icons/crypt_exit.png",
+    "minimap_icons/player.png"
+  ],
+  "generated_silhouettes": [
+    "silhouettes/AthenaAlt.png",
+    "silhouettes/Bandit.png",
+    "silhouettes/BanditAlt.png",
+    "silhouettes/BirdoAlt.png",
+    "silhouettes/BloodMage.png",
+    "silhouettes/BloodMageAlt.png",
+    "silhouettes/BloodMageAltLowest.png",
+    "silhouettes/Book.png",
+    "silhouettes/BossLamp.png",
+    "silhouettes/BossPortal.png",
+    "silhouettes/Calcium.png",
+    "silhouettes/CowboyLow.png",
+    "silhouettes/FoxWizard.png",
+    "silhouettes/FoxWizardLow.png",
+    "silhouettes/FoxWizardLowest.png",
+    "silhouettes/Ghost.png",
+    "silhouettes/Knight.png",
+    "silhouettes/model_wizard.png",
+    "silhouettes/Monke.png",
+    "silhouettes/Orc.png",
+    "silhouettes/ShadyGuy.png",
+    "silhouettes/ShadyHat.png"
+  ],
+  "errors": [
+    "UnityPy is not installed; skipped sharedassets extraction"
+  ]
+}

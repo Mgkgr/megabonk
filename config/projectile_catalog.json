@@ -1,0 +1,205 @@
+[
+  {
+    "entity_id": "projectile_arrow",
+    "kind": "projectile",
+    "display_name": "ProjectileArrow",
+    "aliases": ["projectilearrow", "arrowprojectile", "cactusprojectile"],
+    "preview_relpath": "enemies/Bloody_Cleaver.png",
+    "threat_tier": 1.8,
+    "metadata": {
+      "family": "projectile_arrow",
+      "variant": "default",
+      "damage_type": "physical"
+    }
+  },
+  {
+    "entity_id": "projectile_bloodmagic",
+    "kind": "projectile",
+    "display_name": "ProjectileBloodMagic",
+    "aliases": ["projectilebloodmagic", "bloodstaffprojectile", "bloodmagic"],
+    "preview_relpath": "enemies/BloodMagic.png",
+    "threat_tier": 2.6,
+    "metadata": {
+      "family": "projectile_bloodmagic",
+      "variant": "default",
+      "damage_type": "blood"
+    }
+  },
+  {
+    "entity_id": "projectile_mines",
+    "kind": "projectile",
+    "display_name": "ProjectileMines",
+    "aliases": ["projectilemines", "mineprojectile", "spiderboomer"],
+    "preview_relpath": "enemies/B_SpiderBoomer_Color.png",
+    "threat_tier": 2.4,
+    "metadata": {
+      "family": "projectile_mines",
+      "variant": "default",
+      "damage_type": "explosive"
+    }
+  },
+  {
+    "entity_id": "projectile_poison_flask",
+    "kind": "projectile",
+    "display_name": "ProjectilePoisonFlask",
+    "aliases": ["projectilepoisonflask", "bosspoisonplayer", "poisonflask"],
+    "preview_relpath": "enemies/ItemBeer.png",
+    "threat_tier": 2.4,
+    "metadata": {
+      "family": "projectile_poison_flask",
+      "variant": "default",
+      "damage_type": "poison"
+    }
+  },
+  {
+    "entity_id": "projectile_rocket",
+    "kind": "projectile",
+    "display_name": "ProjectileRocket",
+    "aliases": ["projectilerocket", "rocketprojectile", "bossbuster"],
+    "preview_relpath": "enemies/ItemBossBuster.png",
+    "threat_tier": 2.8,
+    "metadata": {
+      "family": "projectile_rocket",
+      "variant": "default",
+      "damage_type": "explosive"
+    }
+  },
+  {
+    "entity_id": "projectile_shotgun",
+    "kind": "projectile",
+    "display_name": "ProjectileShotgun",
+    "aliases": ["projectileshotgun", "shotgunprojectile"],
+    "preview_relpath": "enemies/Bloodmark.png",
+    "threat_tier": 2.2,
+    "metadata": {
+      "family": "projectile_shotgun",
+      "variant": "default",
+      "damage_type": "physical"
+    }
+  },
+  {
+    "entity_id": "projectile_herosword",
+    "kind": "projectile",
+    "display_name": "ProjectileHeroSword",
+    "aliases": ["projectileherosword", "heroswordprojectile"],
+    "preview_relpath": "enemies/Bloody_Cleaver.png",
+    "threat_tier": 2.4,
+    "metadata": {
+      "family": "projectile_herosword",
+      "variant": "default",
+      "damage_type": "physical"
+    }
+  },
+  {
+    "entity_id": "projectile_lightningbolt",
+    "kind": "projectile",
+    "display_name": "ProjectileLightningBolt",
+    "aliases": ["projectilelightningbolt", "lightningboltprojectile"],
+    "preview_relpath": "enemies/Bloodmark.png",
+    "threat_tier": 2.6,
+    "metadata": {
+      "family": "projectile_lightningbolt",
+      "variant": "default",
+      "damage_type": "lightning"
+    }
+  },
+  {
+    "entity_id": "projectile_explosion",
+    "kind": "hazard",
+    "display_name": "ProjectileExplosion",
+    "aliases": ["projectileexplosion", "enemyprojectilemud"],
+    "preview_relpath": "enemies/Bloodmark.png",
+    "threat_tier": 2.8,
+    "metadata": {
+      "family": "projectile_explosion",
+      "variant": "default",
+      "damage_type": "explosive",
+      "hazard_kind": "explosion"
+    }
+  },
+  {
+    "entity_id": "bossorb",
+    "kind": "projectile",
+    "display_name": "BossOrb",
+    "aliases": ["bossorb", "bossorbbleed", "bossorbshooty"],
+    "preview_relpath": "enemies/Bloodmark.png",
+    "threat_tier": 3.0,
+    "metadata": {
+      "family": "bossorb",
+      "variant": "default",
+      "scene_tags": ["boss", "finalbossmap"],
+      "damage_type": "arcane"
+    }
+  },
+  {
+    "entity_id": "bosspoison",
+    "kind": "projectile",
+    "display_name": "BossPoison",
+    "aliases": ["bosspoison", "bosspoisonplayer"],
+    "preview_relpath": "enemies/ItemBeer.png",
+    "threat_tier": 3.0,
+    "metadata": {
+      "family": "bosspoison",
+      "variant": "default",
+      "scene_tags": ["boss", "finalbossmap"],
+      "damage_type": "poison"
+    }
+  },
+  {
+    "entity_id": "ghostboss_spike",
+    "kind": "hazard",
+    "display_name": "GhostBossSpike",
+    "aliases": ["ghostbossspike", "ghostspike"],
+    "preview_relpath": "enemies/t_ghostSpike.png",
+    "threat_tier": 3.1,
+    "metadata": {
+      "family": "ghostboss_spike",
+      "variant": "default",
+      "scene_tags": ["boss", "crypt"],
+      "damage_type": "physical",
+      "hazard_kind": "spike"
+    }
+  },
+  {
+    "entity_id": "poison_spikes",
+    "kind": "hazard",
+    "display_name": "PoisonSpikes",
+    "aliases": ["poisonspikes"],
+    "preview_relpath": "enemies/t_ghostSpike.png",
+    "threat_tier": 2.8,
+    "metadata": {
+      "family": "poison_spikes",
+      "variant": "default",
+      "damage_type": "poison",
+      "hazard_kind": "poison_spikes"
+    }
+  },
+  {
+    "entity_id": "root_spikes",
+    "kind": "hazard",
+    "display_name": "RootSpikes",
+    "aliases": ["rootspikes"],
+    "preview_relpath": "enemies/t_ghostSpike.png",
+    "threat_tier": 2.8,
+    "metadata": {
+      "family": "root_spikes",
+      "variant": "default",
+      "damage_type": "nature",
+      "hazard_kind": "root_spikes"
+    }
+  },
+  {
+    "entity_id": "stone_spikes",
+    "kind": "hazard",
+    "display_name": "StoneSpikes",
+    "aliases": ["stonespikes"],
+    "preview_relpath": "enemies/t_ghostSpike.png",
+    "threat_tier": 2.8,
+    "metadata": {
+      "family": "stone_spikes",
+      "variant": "default",
+      "damage_type": "physical",
+      "hazard_kind": "stone_spikes"
+    }
+  }
+]

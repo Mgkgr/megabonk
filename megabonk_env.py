@@ -490,9 +490,9 @@ class MegabonkEnv(gym.Env):
     def __init__(
         self,
         region: dict | None = None,
-        step_hz: int = 12,
+        step_hz: int = 30,
         frame_stack: int = 4,
-        frame_skip_range: tuple[int, int] = (6, 10),
+        frame_skip_range: tuple[int, int] = (1, 1),
         sticky_steps_range: tuple[int, int] = (2, 4),
         jump_key: str = "space",
         slide_key: str = "shift",
@@ -828,8 +828,8 @@ class MegabonkEnv(gym.Env):
         with self._hud_lock:
             hud_values = dict(self._last_hud_values)
             hud_ts = float(self._last_hud_ts)
-            debug_dumped = bool(self._hud_last_debug_dumped)
-            hud_fail_streak = int(self._hud_fail_streak)
+            debug_dumped = bool(getattr(self, "_hud_last_debug_dumped", False))
+            hud_fail_streak = int(getattr(self, "_hud_fail_streak", 0))
         return {
             "hud_ts": hud_ts,
             "time_ocr_ms": hud_values.get("time_ocr_ms"),

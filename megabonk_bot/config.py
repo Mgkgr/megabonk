@@ -30,7 +30,7 @@ class RuntimeConfig:
     hud_debug_min_interval_s: float = 15.0
     event_log_path: str = "logs/runtime_events.jsonl"
     event_log_interval_s: float = 0.2
-    event_schema_version: str = "runtime_events_v2"
+    event_schema_version: str = "runtime_events_v4"
     upgrade_space_cooldown_s: float = 0.3
     cam_yaw_pixels: int = 160
     restart_cooldown_s: float = 3.5
@@ -50,6 +50,16 @@ class DetectionConfig:
     use_onnx: bool = False
     onnx_model_path: str = ""
     scene_memory_ttl_s: float = 2.0
+    asset_refs_dir: str = "art_refs/megabonk_unity_extracts"
+    enemy_catalog_path: str = "config/enemy_catalog.json"
+    world_catalog_path: str = "config/world_catalog.json"
+    projectile_catalog_path: str = "config/projectile_catalog.json"
+    ocr_lexicon_path: str = "config/ocr_lexicon.json"
+    memory_signatures_path: str = ""
+    minimap_enabled: bool = True
+    memory_probe_enabled: bool = True
+    memory_poll_interval_s: float = 0.25
+    enemy_classifier_mode: str = "hybrid"
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,15 @@ class MaxPolicyConfig:
     bunny_hop_enabled: bool = True
     sliding_enabled: bool = True
     collect_shrines_and_statues: bool = True
+
+
+@dataclass(frozen=True)
+class NavigationConfig:
+    profile: str = "cautious"
+    lane_count: int = 5
+    drop_risk_threshold: float = 0.58
+    downhill_z_threshold: float = 0.18
+    memory_required_for_slide: bool = True
 
 
 @dataclass(frozen=True)
@@ -106,6 +125,7 @@ class BotConfig:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     mvp_policy: MvpPolicyConfig = field(default_factory=MvpPolicyConfig)
     max_policy: MaxPolicyConfig = field(default_factory=MaxPolicyConfig)
+    navigation: NavigationConfig = field(default_factory=NavigationConfig)
     autopilot: AutoPilotConfig = field(default_factory=AutoPilotConfig)
     item_priorities: list[str] = field(default_factory=lambda: ["blood_tome", "katana"])
     boss_schedule: list[dict[str, Any]] = field(default_factory=list)
@@ -170,6 +190,7 @@ def _validate_config(data: dict[str, Any]) -> None:
         "detection",
         "mvp_policy",
         "max_policy",
+        "navigation",
         "autopilot",
         "item_priorities",
         "boss_schedule",
@@ -192,6 +213,7 @@ def _validate_config(data: dict[str, Any]) -> None:
     runtime = _must_be_section("runtime")
     detection = _must_be_section("detection")
     mvp_policy = _must_be_section("mvp_policy")
+    navigation = _must_be_section("navigation")
     hotkeys = _must_be_section("hotkeys")
     autopilot = _must_be_section("autopilot")
     heuristic = autopilot.get("heuristic")
@@ -238,8 +260,16 @@ def _validate_config(data: dict[str, Any]) -> None:
     if str(runtime_hud_policy).lower() not in {"startup", "on_fail_change", "interval", "off"}:
         raise ValueError("runtime.hud_debug_save_policy must be one of startup|on_fail_change|interval|off")
     _must_be_type("runtime.event_schema_version", runtime_event_schema_version, str)
-    if str(runtime_event_schema_version).lower() not in {"runtime_events_v1", "runtime_events_v2"}:
-        raise ValueError("runtime.event_schema_version must be one of runtime_events_v1|runtime_events_v2")
+    if str(runtime_event_schema_version).lower() not in {
+        "runtime_events_v1",
+        "runtime_events_v2",
+        "runtime_events_v3",
+        "runtime_events_v4",
+    }:
+        raise ValueError(
+            "runtime.event_schema_version must be one of "
+            "runtime_events_v1|runtime_events_v2|runtime_events_v3|runtime_events_v4"
+        )
 
     detection_grid_rows = _must_have(detection, "detection", "grid_rows")
     detection_grid_cols = _must_have(detection, "detection", "grid_cols")
@@ -248,6 +278,16 @@ def _validate_config(data: dict[str, Any]) -> None:
     detection_scene_memory_ttl = _must_have(detection, "detection", "scene_memory_ttl_s")
     detection_enemy_hsv_lower = _must_have(detection, "detection", "enemy_hsv_lower")
     detection_enemy_hsv_upper = _must_have(detection, "detection", "enemy_hsv_upper")
+    detection_memory_poll_interval = _must_have(detection, "detection", "memory_poll_interval_s")
+    detection_asset_refs_dir = _must_have(detection, "detection", "asset_refs_dir")
+    detection_enemy_catalog_path = _must_have(detection, "detection", "enemy_catalog_path")
+    detection_world_catalog_path = _must_have(detection, "detection", "world_catalog_path")
+    detection_projectile_catalog_path = _must_have(detection, "detection", "projectile_catalog_path")
+    detection_ocr_lexicon_path = _must_have(detection, "detection", "ocr_lexicon_path")
+    detection_memory_signatures_path = _must_have(detection, "detection", "memory_signatures_path")
+    detection_minimap_enabled = _must_have(detection, "detection", "minimap_enabled")
+    detection_memory_probe_enabled = _must_have(detection, "detection", "memory_probe_enabled")
+    detection_enemy_classifier_mode = _must_have(detection, "detection", "enemy_classifier_mode")
 
     _must_be_type("detection.grid_rows", detection_grid_rows, int)
     _must_be_positive("detection.grid_rows", detection_grid_rows)
@@ -260,12 +300,50 @@ def _validate_config(data: dict[str, Any]) -> None:
         raise ValueError("detection.interact_threshold must be in [0.0, 1.0]")
     _must_be_type("detection.scene_memory_ttl_s", detection_scene_memory_ttl, (int, float))
     _must_be_non_negative("detection.scene_memory_ttl_s", float(detection_scene_memory_ttl))
+    _must_be_type("detection.memory_poll_interval_s", detection_memory_poll_interval, (int, float))
+    _must_be_non_negative("detection.memory_poll_interval_s", float(detection_memory_poll_interval))
+    _must_be_type("detection.asset_refs_dir", detection_asset_refs_dir, str)
+    _must_be_type("detection.enemy_catalog_path", detection_enemy_catalog_path, str)
+    _must_be_type("detection.world_catalog_path", detection_world_catalog_path, str)
+    _must_be_type("detection.projectile_catalog_path", detection_projectile_catalog_path, str)
+    _must_be_type("detection.ocr_lexicon_path", detection_ocr_lexicon_path, str)
+    _must_be_type("detection.memory_signatures_path", detection_memory_signatures_path, str)
+    _must_be_type("detection.minimap_enabled", detection_minimap_enabled, bool)
+    _must_be_type("detection.memory_probe_enabled", detection_memory_probe_enabled, bool)
+    _must_be_type("detection.enemy_classifier_mode", detection_enemy_classifier_mode, str)
+    if str(detection_enemy_classifier_mode).lower() not in {"off", "catalog", "hybrid"}:
+        raise ValueError("detection.enemy_classifier_mode must be one of off|catalog|hybrid")
     _validate_hsv_triplet("detection.enemy_hsv_lower", detection_enemy_hsv_lower)
     _validate_hsv_triplet("detection.enemy_hsv_upper", detection_enemy_hsv_upper)
 
     map_scan_interval = _must_have(mvp_policy, "mvp_policy", "map_scan_interval_ticks")
     _must_be_type("mvp_policy.map_scan_interval_ticks", map_scan_interval, int)
     _must_be_positive("mvp_policy.map_scan_interval_ticks", map_scan_interval)
+
+    navigation_profile = _must_have(navigation, "navigation", "profile")
+    navigation_lane_count = _must_have(navigation, "navigation", "lane_count")
+    navigation_drop_risk_threshold = _must_have(navigation, "navigation", "drop_risk_threshold")
+    navigation_downhill_z_threshold = _must_have(navigation, "navigation", "downhill_z_threshold")
+    navigation_memory_required_for_slide = _must_have(
+        navigation,
+        "navigation",
+        "memory_required_for_slide",
+    )
+    _must_be_type("navigation.profile", navigation_profile, str)
+    if str(navigation_profile).lower() not in {"cautious", "balanced", "aggressive"}:
+        raise ValueError("navigation.profile must be one of cautious|balanced|aggressive")
+    _must_be_type("navigation.lane_count", navigation_lane_count, int)
+    _must_be_positive("navigation.lane_count", navigation_lane_count)
+    _must_be_type("navigation.drop_risk_threshold", navigation_drop_risk_threshold, (int, float))
+    if not 0.0 <= float(navigation_drop_risk_threshold) <= 1.0:
+        raise ValueError("navigation.drop_risk_threshold must be in [0.0, 1.0]")
+    _must_be_type("navigation.downhill_z_threshold", navigation_downhill_z_threshold, (int, float))
+    _must_be_non_negative("navigation.downhill_z_threshold", float(navigation_downhill_z_threshold))
+    _must_be_type(
+        "navigation.memory_required_for_slide",
+        navigation_memory_required_for_slide,
+        bool,
+    )
 
     autopilot_click_cooldown = _must_have(autopilot, "autopilot", "click_cooldown_s")
     autopilot_template_thresholds = _must_have(autopilot, "autopilot", "template_thresholds")

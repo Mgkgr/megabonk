@@ -4,10 +4,26 @@ import numpy as np
 from megabonk_bot.templates import load_templates
 
 
-def match_template(gray_img, gray_tpl):
-    res = cv2.matchTemplate(gray_img, gray_tpl, cv2.TM_CCOEFF_NORMED)
+_LOW_VARIANCE_EPS = 1e-6
+
+
+def _pick_match_method(gray_tpl, method):
+    if method == cv2.TM_CCOEFF_NORMED and float(np.std(gray_tpl)) <= _LOW_VARIANCE_EPS:
+        return cv2.TM_SQDIFF_NORMED
+    return method
+
+
+def _match_with_score(gray_img, gray_tpl, method):
+    chosen_method = _pick_match_method(gray_tpl, method)
+    res = cv2.matchTemplate(gray_img, gray_tpl, chosen_method)
     minv, maxv, minp, maxp = cv2.minMaxLoc(res)
-    return maxv, maxp  # score, top-left
+    if chosen_method in (cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED):
+        return 1.0 - float(minv), minp
+    return float(maxv), maxp
+
+
+def match_template(gray_img, gray_tpl):
+    return _match_with_score(gray_img, gray_tpl, cv2.TM_CCOEFF_NORMED)
 
 
 def _to_gray(img):
@@ -94,12 +110,11 @@ def find_in_region(
 
         interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         g_tpl = cv2.resize(g_tpl0, (tw, th), interpolation=interp)
-        res = cv2.matchTemplate(g_roi, g_tpl, method)
-        _, maxv, _, maxloc = cv2.minMaxLoc(res)
-        if maxv > best_score:
+        score, maxloc = _match_with_score(g_roi, g_tpl, method)
+        if score > best_score:
             cx = x + maxloc[0] + tw // 2
             cy = y + maxloc[1] + th // 2
-            best_score = float(maxv)
+            best_score = score
             best_center = (cx, cy)
             best_size = (tw, th)
 

@@ -8,7 +8,10 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from megabonk_bot.asset_catalog import load_curated_catalogs
 from megabonk_bot.config import DEFAULT_CONFIG, dump_default_config_yaml, load_config
+from megabonk_bot.memory_probe import ExternalProcessProbe, NullProbe
+from megabonk_bot.navigation import StatefulNavigationPlanner
 from megabonk_bot.runtime.event_logger import (
     JsonlEventLogger,
     RUNTIME_EVENT_SCHEMA_VERSION,
@@ -26,7 +29,7 @@ from megabonk_bot.runtime.input_controller import (
 from megabonk_bot.runtime.loop import RateLimiter, maybe_warn_capture_error
 from megabonk_bot.runtime.overlay import (
     draw_runtime_overlay as _runtime_draw_runtime_overlay,
-    point_in_rect as _runtime_point_in_rect,
+    handle_overlay_mouse_event as _runtime_handle_overlay_mouse_event,
 )
 from megabonk_bot.runtime.recovery import RecoveryState, decide_recovery_action
 
@@ -36,6 +39,8 @@ HWND_TOPMOST = -1
 HWND_NOTOPMOST = -2
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
 SWP_SHOWWINDOW = 0x0040
 GWL_EXSTYLE = -20
 GWL_STYLE = -16
@@ -160,7 +165,7 @@ def _set_overlay_topmost(window_name: str) -> bool:
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
         )
     )
 
@@ -191,7 +196,7 @@ def _move_overlay_window(
             int(y),
             int(w),
             int(h),
-            SWP_SHOWWINDOW,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
         )
     )
 
@@ -216,7 +221,11 @@ def _set_overlay_borderless(window_name: str) -> bool:
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            SWP_NOMOVE
+            | SWP_NOSIZE
+            | SWP_NOACTIVATE
+            | SWP_FRAMECHANGED
+            | SWP_SHOWWINDOW,
         )
     )
 
@@ -254,6 +263,19 @@ def _sync_overlay_to_game_window(
     )
 
 
+def _ensure_overlay_window(window_name: str, *, width: int, height: int) -> None:
+    if cv2 is None:
+        return
+    cv2.namedWindow(window_name, getattr(cv2, "WINDOW_NORMAL", 0))
+    _resize_overlay_window(window_name, width=width, height=height)
+
+
+def _resize_overlay_window(window_name: str, *, width: int, height: int) -> None:
+    if cv2 is None:
+        return
+    cv2.resizeWindow(window_name, max(1, int(width)), max(1, int(height)))
+
+
 class WinHotkeyPoller:
     def __init__(self, *, enabled: bool, toggle_vk: int, panic_vk: int):
         self.enabled = bool(enabled) and hasattr(ctypes, "windll")
@@ -283,11 +305,6 @@ class WinHotkeyPoller:
         panic = self._edge_down(self.panic_vk)
         return toggle, panic
 
-
-def _point_in_rect(x: int, y: int, rect: Optional[tuple[int, int, int, int]]) -> bool:
-    return _runtime_point_in_rect(x, y, rect)
-
-
 def build_runtime_event(
     *,
     ts: float,
@@ -314,6 +331,7 @@ def build_runtime_event(
     capture_last_error: Optional[str] = None,
     hud_debug_dumped: bool = False,
     hud_fail_streak: int = 0,
+    navigation_context=None,
     schema_version: str = RUNTIME_EVENT_SCHEMA_VERSION,
 ) -> dict[str, Any]:
     return _build_runtime_event(
@@ -341,6 +359,7 @@ def build_runtime_event(
         capture_last_error=capture_last_error,
         hud_debug_dumped=hud_debug_dumped,
         hud_fail_streak=hud_fail_streak,
+        navigation_context=navigation_context,
         schema_version=schema_version,
     )
 
@@ -354,6 +373,7 @@ def _draw_runtime_overlay(
     action_reason: str,
     hud_values: dict[str, Any],
     hud_regions: dict[str, Any],
+    navigation_context=None,
     transparent_canvas: bool = False,
 ):
     return _runtime_draw_runtime_overlay(
@@ -365,6 +385,7 @@ def _draw_runtime_overlay(
         action_reason=action_reason,
         hud_values=hud_values,
         hud_regions=hud_regions,
+        navigation_context=navigation_context,
         transparent_canvas=transparent_canvas,
     )
 
@@ -398,6 +419,89 @@ def _prepare_heuristic_config(
     return heuristic_cfg
 
 
+def _prepare_navigation_config(
+    navigation_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "profile": str(navigation_cfg.get("profile", "cautious")),
+        "lane_count": int(navigation_cfg.get("lane_count", 5)),
+        "drop_risk_threshold": float(navigation_cfg.get("drop_risk_threshold", 0.58)),
+        "downhill_z_threshold": float(navigation_cfg.get("downhill_z_threshold", 0.18)),
+        "memory_required_for_slide": bool(navigation_cfg.get("memory_required_for_slide", True)),
+    }
+
+
+def _build_threat_candidates(snapshot, tracked_entity_cls):
+    threat_candidates = list(snapshot.enemy_classes)
+    if not threat_candidates:
+        threat_candidates = [
+            tracked_entity_cls(
+                label=item.label,
+                rect=item.rect,
+                score=item.score,
+                source="screen_cv",
+                entity_id=item.label,
+                threat_tier=1.0,
+            )
+            for item in snapshot.enemies
+        ]
+    threat_candidates.extend(snapshot.projectile_classes)
+    if not snapshot.projectile_classes:
+        threat_candidates.extend(
+            tracked_entity_cls(
+                label=item.label,
+                rect=item.rect,
+                score=item.score,
+                source="screen_cv",
+                entity_id=item.label,
+                threat_tier=1.6,
+                family="projectile",
+            )
+            for item in snapshot.projectiles
+        )
+    threat_candidates.extend(
+        tracked_entity_cls(
+            label=item.label,
+            rect=item.rect,
+            score=item.score,
+            source=item.source,
+            entity_id=item.entity_id,
+            threat_tier=max(
+                1.7,
+                float(item.metadata.get("threat_tier", 1.7))
+                if isinstance(item.metadata, dict)
+                else 1.7,
+            ),
+            family=item.family,
+            variant=item.variant,
+            metadata=dict(item.metadata),
+        )
+        for item in snapshot.hazards
+    )
+    return threat_candidates
+
+
+def _resolve_optional_path(raw_path: str | None, *, base_dir: Path) -> Path | None:
+    if raw_path is None:
+        return None
+    text = str(raw_path).strip()
+    if not text:
+        return None
+    path = Path(text)
+    if path.is_absolute():
+        return path
+    return (base_dir / path).resolve()
+
+
+def _load_optional_json(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    import json
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return raw if isinstance(raw, dict) else {}
+
+
 def run(args) -> None:
     global cv2
     global di
@@ -405,7 +509,7 @@ def run(args) -> None:
     import cv2 as _cv2
     import pydirectinput as _di
 
-    from autopilot import AutoPilot, HeuristicAutoPilot, is_death_like_frame
+    from autopilot import AutoPilot, is_death_like_frame
     from megabonk_bot.hud import read_hud_telemetry
     from megabonk_bot.max_model import (
         BossWindow,
@@ -419,9 +523,10 @@ def run(args) -> None:
     )
     from megabonk_bot.recognition import analyze_scene
     from megabonk_bot.regions import build_regions
-    from megabonk_bot.runtime_logic import BotMode, build_scene_snapshot, choose_mvp_action
+    from megabonk_bot.runtime_logic import BotMode, build_scene_snapshot
     from megabonk_bot.runtime_state import RuntimeStateMachine
     from megabonk_bot.templates import load_templates
+    from megabonk_bot.world_state import TrackedEntity
     from window_capture import WindowCapture
 
     cv2 = _cv2
@@ -429,11 +534,14 @@ def run(args) -> None:
     di.PAUSE = 0.0
     di.FAILSAFE = False
 
-    config = load_config(Path(args.config).resolve() if args.config else None)
+    config_path = Path(args.config).resolve() if args.config else None
+    config_base_dir = config_path.parent if config_path else Path(__file__).resolve().parent
+    config = load_config(config_path)
     runtime_cfg = config["runtime"]
     detect_cfg = config["detection"]
     mvp_cfg = config["mvp_policy"]
     max_cfg = config["max_policy"]
+    navigation_cfg = config["navigation"]
     hotkey_cfg = config["hotkeys"]
     autopilot_cfg = config["autopilot"]
 
@@ -455,7 +563,7 @@ def run(args) -> None:
     overlay_topmost_enabled = bool(runtime_cfg.get("overlay_topmost", True))
     overlay_transparent = bool(runtime_cfg.get("overlay_transparent", True))
     window_title = str(args.window or runtime_cfg["window_title"])
-    templates_dir = str(args.templates_dir or runtime_cfg["templates_dir"])
+    templates_dir = str(_resolve_optional_path(str(args.templates_dir or runtime_cfg["templates_dir"]), base_dir=config_base_dir))
     capture_backend = str(args.capture_backend or runtime_cfg.get("capture_backend", "auto"))
     if args.window_focus_interval_s is None:
         window_focus_interval_s = float(runtime_cfg.get("window_focus_interval_s", 0.25))
@@ -466,8 +574,35 @@ def run(args) -> None:
     cap.focus(topmost=True)
     window_click = _make_window_click(cap, focus_interval_s=window_focus_interval_s)
     bbox = cap.get_bbox()
+    if overlay_enabled:
+        _ensure_overlay_window(
+            overlay_window,
+            width=int(bbox.get("width", 1)),
+            height=int(bbox.get("height", 1)),
+        )
     regions = build_regions(bbox["width"], bbox["height"])
     templates = load_templates(templates_dir)
+    asset_refs_dir = _resolve_optional_path(str(detect_cfg.get("asset_refs_dir", "")), base_dir=config_base_dir)
+    enemy_catalog_path = _resolve_optional_path(str(detect_cfg.get("enemy_catalog_path", "")), base_dir=config_base_dir)
+    world_catalog_path = _resolve_optional_path(str(detect_cfg.get("world_catalog_path", "")), base_dir=config_base_dir)
+    projectile_catalog_path = _resolve_optional_path(str(detect_cfg.get("projectile_catalog_path", "")), base_dir=config_base_dir)
+    ocr_lexicon_path = _resolve_optional_path(str(detect_cfg.get("ocr_lexicon_path", "")), base_dir=config_base_dir)
+    memory_signatures_path = _resolve_optional_path(str(detect_cfg.get("memory_signatures_path", "")), base_dir=config_base_dir)
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=asset_refs_dir,
+        enemy_catalog_path=enemy_catalog_path,
+        world_catalog_path=world_catalog_path,
+        projectile_catalog_path=projectile_catalog_path,
+        ocr_lexicon_path=ocr_lexicon_path,
+    )
+    if bool(detect_cfg.get("memory_probe_enabled", True)):
+        world_probe = ExternalProcessProbe(
+            window_title=window_title,
+            poll_interval_s=float(detect_cfg.get("memory_poll_interval_s", 0.25)),
+            signatures=_load_optional_json(memory_signatures_path),
+        )
+    else:
+        world_probe = NullProbe()
     autopilot = AutoPilot(
         templates=templates,
         regions=regions,
@@ -476,8 +611,15 @@ def run(args) -> None:
         click_fn=window_click,
     )
     heuristic_cfg = _prepare_heuristic_config(detect_cfg, autopilot_cfg)
-    heuristic_pilot = HeuristicAutoPilot(
-        config=heuristic_cfg,
+    navigation_planner = StatefulNavigationPlanner(
+        config=_prepare_navigation_config(navigation_cfg),
+        allow_bunny_hop=bool(max_cfg.get("bunny_hop_enabled", True)),
+        sliding_enabled=bool(max_cfg.get("sliding_enabled", True)),
+        jump_cooldown=int(heuristic_cfg.get("jump_cooldown", 30)),
+        slide_cooldown=int(heuristic_cfg.get("slide_cooldown", 24)),
+        stuck_diff_threshold=float(heuristic_cfg.get("stuck_diff_threshold", 3.0)),
+        stuck_frames_required=int(heuristic_cfg.get("stuck_frames_required", 6)),
+        stuck_escape_ticks=int(heuristic_cfg.get("stuck_escape_ticks", 16)),
     )
     hotkeys = WinHotkeyPoller(
         enabled=bool(hotkey_cfg["enabled"]) and not args.no_hotkeys,
@@ -513,15 +655,10 @@ def run(args) -> None:
     overlay_controls = {"toggle": False, "panic": False, "rects": {}}
     pending_toggle = False
     pending_panic = False
+    last_scene_signature: tuple[str | None, str | None, bool | None] | None = None
 
     def _on_overlay_mouse(event, x, y, _flags, state):
-        if event != cv2.EVENT_LBUTTONUP or not isinstance(state, dict):
-            return
-        rects = state.get("rects", {})
-        if _point_in_rect(int(x), int(y), rects.get("toggle")):
-            state["toggle"] = True
-        elif _point_in_rect(int(x), int(y), rects.get("panic")):
-            state["panic"] = True
+        _runtime_handle_overlay_mouse_event(cv2, event, x, y, state)
 
     try:
         while True:
@@ -536,13 +673,16 @@ def run(args) -> None:
             if panic:
                 mode = state_machine.on_events(panic=True)
                 release_all_keys()
+                navigation_planner.reset()
             if toggle:
                 mode = state_machine.on_events(toggle=True)
                 if mode == BotMode.ACTIVE:
                     recovery_state.attempts = 0
                     recovery_state.started_ts = 0.0
+                    navigation_planner.reset()
                 else:
                     release_all_keys()
+                    navigation_planner.reset()
 
             frame = cap.grab()
             capture_diag = cap.get_capture_diagnostics()
@@ -563,6 +703,12 @@ def run(args) -> None:
             if bbox["width"] != w or bbox["height"] != h:
                 bbox["width"] = w
                 bbox["height"] = h
+                if overlay_enabled:
+                    _resize_overlay_window(
+                        overlay_window,
+                        width=int(w),
+                        height=int(h),
+                    )
                 regions = build_regions(w, h)
                 autopilot = AutoPilot(
                     templates=templates,
@@ -576,36 +722,88 @@ def run(args) -> None:
             is_dead = screen == "DEAD" or (screen != "RUNNING" and is_death_like_frame(frame))
             is_upgrade = _is_upgrade_dialog(frame, templates, regions)
             hud_values = read_hud_telemetry(frame, regions=regions)
+            probe_result = world_probe.sample(now_ts=time.time())
 
             analysis = analyze_scene(
                 frame,
                 templates=templates,
+                catalogs=catalogs,
+                regions=regions,
+                probe_result=probe_result,
                 grid_rows=int(detect_cfg["grid_rows"]),
                 grid_cols=int(detect_cfg["grid_cols"]),
                 enemy_hsv_lower=tuple(detect_cfg["enemy_hsv_lower"]),
                 enemy_hsv_upper=tuple(detect_cfg["enemy_hsv_upper"]),
                 enemy_min_area=float(detect_cfg["enemy_min_area"]),
                 interact_threshold=float(detect_cfg["interact_threshold"]),
+                enemy_classifier_mode=str(detect_cfg.get("enemy_classifier_mode", "hybrid")),
+                minimap_enabled=bool(detect_cfg.get("minimap_enabled", True)),
             )
 
             analysis.setdefault("projectiles", [])
             onnx_detections: list[ObjectDetection] = []
             if onnx_detector is not None and onnx_detector.enabled:
                 onnx_detections = onnx_detector.detect(frame)
-                analysis["projectiles"].extend(
-                    [det for det in onnx_detections if det.label == "projectile"]
-                )
-            scene_memory.update(onnx_detections)
+                analysis.setdefault("enemy_classes", [])
+                for det in onnx_detections:
+                    lowered = str(det.label).lower()
+                    if "projectile" in lowered:
+                        analysis["projectiles"].append(det)
+                    else:
+                        analysis["enemy_classes"].append(
+                            TrackedEntity(
+                                label=det.label,
+                                rect=det.rect,
+                                score=det.score,
+                                source="onnx",
+                                entity_id=det.label,
+                                threat_tier=2.0 if "boss" in lowered else 1.5,
+                            )
+                        )
+            scene_memory_items = [
+                ObjectDetection(label=item.label, rect=item.rect, score=float(item.score))
+                for item in analysis.get("enemy_classes", [])
+            ]
+            scene_memory_items.extend(
+                ObjectDetection(label=item.label, rect=item.rect, score=float(item.score))
+                for item in analysis.get("projectile_classes", [])
+            )
+            scene_memory_items.extend(
+                ObjectDetection(label=item.label, rect=item.rect, score=float(item.score))
+                for item in analysis.get("world_objects", [])
+            )
+            scene_memory_items.extend(
+                ObjectDetection(label=item.label, rect=item.rect, score=float(item.score))
+                for item in analysis.get("projectiles", [])
+            )
+            scene_memory_items.extend(
+                ObjectDetection(label=item.label, rect=item.rect, score=float(item.score))
+                for item in analysis.get("hazards", [])
+            )
+            scene_memory.update(scene_memory_items)
 
             snapshot = build_scene_snapshot(
                 frame_id=frame_id,
                 ts=time.time(),
                 frame_width=w,
+                frame_height=h,
                 analysis=analysis,
                 hud_values=hud_values,
                 is_dead=is_dead,
                 is_upgrade=is_upgrade,
             )
+
+            map_state = getattr(snapshot, "map_state", None)
+            scene_signature = (
+                getattr(map_state, "scene_id", None) if map_state is not None else None,
+                getattr(map_state, "active_room_id", None) if map_state is not None else None,
+                getattr(map_state, "is_crypt", None) if map_state is not None else None,
+            )
+            if last_scene_signature is None:
+                last_scene_signature = scene_signature
+            elif scene_signature != last_scene_signature:
+                scene_memory.clear()
+                last_scene_signature = scene_signature
 
             if mode == BotMode.ACTIVE and snapshot.is_dead:
                 mode = state_machine.on_events(dead_detected=True)
@@ -615,6 +813,9 @@ def run(args) -> None:
             allow_tab_scan = bool(mvp_cfg.get("allow_map_scan_tab", False)) or bool(
                 max_enabled and max_cfg.get("explore_with_tab", False)
             )
+            current_scene_id = str(getattr(map_state, "scene_id", "") or "").lower()
+            if current_scene_id == "finalbossmap":
+                allow_tab_scan = False
             map_scan_now = False
             if allow_tab_scan:
                 map_scan_tick += 1
@@ -622,14 +823,30 @@ def run(args) -> None:
                     map_scan_now = True
                     map_scan_tick = 0
 
-            heuristic_action = None
-            if mode == BotMode.ACTIVE and not snapshot.is_dead and not snapshot.is_upgrade:
-                heuristic_action = heuristic_pilot.act(frame, include_cam_yaw=True)
-
-            action = choose_mvp_action(
+            threat_candidates = _build_threat_candidates(snapshot, TrackedEntity)
+            threats = score_enemy_threats(
+                threat_candidates,
+                frame_w=w,
+                frame_h=h,
+            )
+            occupancy = build_occupancy_cost_map(
+                frame_w=w,
+                frame_h=h,
+                obstacles=[
+                    ObjectDetection(label=item.label, rect=item.rect, score=item.score)
+                    for item in snapshot.obstacles
+                ],
+                rows=int(detect_cfg["grid_rows"]),
+                cols=int(detect_cfg["grid_cols"]),
+            )
+            preferred_direction = pick_low_cost_direction(occupancy)
+            elapsed = int(time.time() - run_started_ts)
+            boss_prep, boss_name = should_enter_boss_prep(elapsed, boss_schedule)
+            action, navigation_context = navigation_planner.evaluate(
+                frame,
                 snapshot,
                 mode=mode,
-                heuristic_action=heuristic_action,
+                threats=threats,
                 allow_map_scan=allow_tab_scan,
                 map_scan_now=map_scan_now,
             )
@@ -707,34 +924,6 @@ def run(args) -> None:
                 set_move(0)
                 release_all_keys()
 
-            if max_enabled and bool(max_cfg.get("threat_scoring", True)):
-                threats = score_enemy_threats(
-                    [
-                        ObjectDetection(label=item.label, rect=item.rect, score=item.score)
-                        for item in snapshot.enemies
-                    ],
-                    frame_w=w,
-                    frame_h=h,
-                )
-                occupancy = build_occupancy_cost_map(
-                    frame_w=w,
-                    frame_h=h,
-                    obstacles=[
-                        ObjectDetection(label=item.label, rect=item.rect, score=item.score)
-                        for item in snapshot.obstacles
-                    ],
-                    rows=int(detect_cfg["grid_rows"]),
-                    cols=int(detect_cfg["grid_cols"]),
-                )
-                preferred_direction = pick_low_cost_direction(occupancy)
-                elapsed = int(time.time() - run_started_ts)
-                boss_prep, boss_name = should_enter_boss_prep(elapsed, boss_schedule)
-            else:
-                threats = []
-                preferred_direction = "center"
-                boss_prep = False
-                boss_name = None
-
             now = time.time()
             if now - last_event_log_ts >= log_interval_s:
                 last_event_log_ts = now
@@ -767,6 +956,7 @@ def run(args) -> None:
                     ),
                     hud_debug_dumped=bool(hud_values.get("debug_dumped", False)),
                     hud_fail_streak=int(hud_values.get("hud_fail_streak", 0) or 0),
+                    navigation_context=navigation_context,
                     schema_version=event_schema_version,
                 )
                 logger.log(event)
@@ -780,6 +970,7 @@ def run(args) -> None:
                     action_reason=action.reason,
                     hud_values=hud_values,
                     hud_regions=regions,
+                    navigation_context=navigation_context,
                     transparent_canvas=overlay_transparent,
                 )
                 overlay_controls["rects"] = button_rects
@@ -795,6 +986,11 @@ def run(args) -> None:
                         game_bbox = cap.get_bbox()
                     except Exception:
                         game_bbox = bbox
+                    _resize_overlay_window(
+                        overlay_window,
+                        width=int(game_bbox.get("width", w)),
+                        height=int(game_bbox.get("height", h)),
+                    )
                     _sync_overlay_to_game_window(
                         overlay_window,
                         game_bbox,
@@ -824,6 +1020,10 @@ def run(args) -> None:
 
     finally:
         release_all_keys()
+        try:
+            world_probe.close()
+        except Exception:
+            pass
         logger.close()
         if overlay_enabled:
             cv2.destroyAllWindows()

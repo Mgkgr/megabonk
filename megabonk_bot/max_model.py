@@ -29,19 +29,22 @@ class BossWindow:
 
 
 class OnnxObjectDetector:
-    """Тонкий адаптер для ONNX Runtime.
+    """Lightweight ONNX Runtime adapter with a permissive parser."""
 
-    В MVP может не использоваться, но интерфейс готов для Max-этапа.
-    """
-
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, *, score_threshold: float = 0.25):
         self.model_path = model_path
+        self.score_threshold = float(score_threshold)
         self._session = None
         self._enabled = False
+        self._input_name = None
+        self._class_labels: dict[int, str] = {}
         try:
             import onnxruntime as ort  # type: ignore
 
             self._session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+            inputs = self._session.get_inputs()
+            if inputs:
+                self._input_name = inputs[0].name
             self._enabled = True
         except Exception:
             self._session = None
@@ -51,16 +54,66 @@ class OnnxObjectDetector:
     def enabled(self) -> bool:
         return self._enabled
 
-    def detect(self, _frame_bgr) -> list[ObjectDetection]:
-        # Интеграция реального препроцессинга/постпроцессинга модели
-        # будет добавляться в Max-этапе.
-        if not self._enabled:
+    def detect(self, frame_bgr) -> list[ObjectDetection]:
+        if not self._enabled or frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
             return []
-        return []
+        if self._input_name is None:
+            return []
+        import cv2
+        import numpy as np
+
+        input_meta = self._session.get_inputs()[0]
+        shape = list(input_meta.shape)
+        target_h = int(shape[2]) if len(shape) >= 4 and isinstance(shape[2], int) and shape[2] > 0 else 640
+        target_w = int(shape[3]) if len(shape) >= 4 and isinstance(shape[3], int) and shape[3] > 0 else 640
+        resized = cv2.resize(frame_bgr, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+        tensor = resized.astype("float32") / 255.0
+        tensor = np.transpose(tensor, (2, 0, 1))[None, ...]
+        outputs = self._session.run(None, {self._input_name: tensor})
+        return self._parse_outputs(outputs, frame_w=frame_bgr.shape[1], frame_h=frame_bgr.shape[0])
+
+    def _parse_outputs(self, outputs, *, frame_w: int, frame_h: int) -> list[ObjectDetection]:
+        import numpy as np
+
+        if not outputs:
+            return []
+        first = outputs[0]
+        if not isinstance(first, np.ndarray):
+            return []
+        arr = np.squeeze(first)
+        if arr.ndim == 1:
+            arr = np.expand_dims(arr, 0)
+        if arr.ndim != 2 or arr.shape[1] < 6:
+            return []
+
+        detections: list[ObjectDetection] = []
+        for row in arr:
+            score = float(row[4])
+            if score < self.score_threshold:
+                continue
+            x0, y0, x1, y1 = [int(round(float(value))) for value in row[:4]]
+            if x1 <= x0 or y1 <= y0:
+                cx = float(row[0]) * frame_w
+                cy = float(row[1]) * frame_h
+                bw = float(row[2]) * frame_w
+                bh = float(row[3]) * frame_h
+                x0 = int(round(cx - bw / 2.0))
+                y0 = int(round(cy - bh / 2.0))
+                x1 = int(round(cx + bw / 2.0))
+                y1 = int(round(cy + bh / 2.0))
+            class_id = int(row[5]) if arr.shape[1] > 5 else 0
+            detections.append(
+                ObjectDetection(
+                    label=self._class_labels.get(class_id, f"class_{class_id}"),
+                    rect=(max(0, x0), max(0, y0), max(1, x1 - x0), max(1, y1 - y0)),
+                    score=score,
+                )
+            )
+        return detections
 
 
 class SceneMemory360:
-    """Краткосрочная память объектов с затуханием."""
+    """Short-lived object memory with TTL decay."""
 
     def __init__(self, ttl_s: float = 2.0):
         self.ttl_s = float(ttl_s)
@@ -83,6 +136,9 @@ class SceneMemory360:
                 alive.append(det)
         return alive
 
+    def clear(self) -> None:
+        self._memory = []
+
 
 def score_enemy_threats(
     enemies: list[ObjectDetection],
@@ -104,7 +160,23 @@ def score_enemy_threats(
         dist_norm = min(1.0, dist / max(1.0, frame_diag))
         area = max(1.0, float(w * h))
         area_norm = min(1.0, area / max(1.0, frame_w * frame_h * 0.2))
-        priority = (1.0 - dist_norm) * 0.7 + area_norm * 0.3
+        threat_tier = float(getattr(enemy, "threat_tier", 1.0) or 1.0)
+        label = str(getattr(enemy, "label", "enemy")).lower()
+        family = str(getattr(enemy, "family", "") or "").lower()
+        hazard_kind = str(getattr(enemy, "hazard_kind", "") or "").lower()
+        metadata = getattr(enemy, "metadata", {}) or {}
+        if isinstance(metadata, dict):
+            hazard_kind = hazard_kind or str(metadata.get("hazard_kind", "") or "").lower()
+            family = family or str(metadata.get("family", "") or "").lower()
+        if "projectile" in label:
+            threat_tier = max(threat_tier, 1.4)
+        if "boss" in label:
+            threat_tier = max(threat_tier, 2.0)
+        if family in {"bossorb", "bosspoison", "ghostboss", "projectilebloodmagic"}:
+            threat_tier = max(threat_tier, 1.8)
+        if hazard_kind in {"spike", "poison", "root", "stone", "explosion", "hazard"}:
+            threat_tier = max(threat_tier, 1.7)
+        priority = ((1.0 - dist_norm) * 0.7 + area_norm * 0.3) * threat_tier
         priority *= max(0.0, min(1.0, float(enemy.score)))
         scores.append(
             ThreatScore(

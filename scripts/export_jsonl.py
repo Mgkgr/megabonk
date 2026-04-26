@@ -45,6 +45,46 @@ FULL_COLUMNS = [
     "capture_last_error",
     "hud_debug_dumped",
     "hud_fail_streak",
+    "memory_probe_status",
+    "map_scene_id",
+    "map_is_crypt",
+    "map_objective",
+    "map_objective_confidence",
+    "map_boss_spotted",
+    "map_charged_shrines",
+    "map_graveyard_crypt_keys",
+    "player_pose_source",
+    "player_pose_confidence",
+    "player_pose_map_norm_x",
+    "player_pose_map_norm_y",
+    "player_pose_world_x",
+    "player_pose_world_y",
+    "player_pose_world_z",
+    "player_pose_heading_deg",
+    "map_open",
+    "minimap_visible",
+    "map_biome",
+    "map_active_room_id",
+    "map_poi_count",
+    "map_poi_icons_json",
+    "navigation_terrain_kind",
+    "navigation_drop_risk",
+    "navigation_obstacle_cost",
+    "navigation_clearance",
+    "navigation_nav_confidence",
+    "navigation_source",
+    "navigation_slope_source",
+    "navigation_slope_delta_z",
+    "navigation_escape_lane",
+    "navigation_jump_gate",
+    "navigation_slide_gate",
+    "navigation_lanes_json",
+    "enemy_classes_json",
+    "projectile_classes_json",
+    "world_objects_json",
+    "hazards_json",
+    "detection_sources_json",
+    "source_confidence_json",
 ]
 
 
@@ -81,6 +121,28 @@ def _event_to_full_row(event: dict[str, Any]) -> dict[str, Any]:
     hud = event.get("hud")
     if not isinstance(hud, dict):
         hud = {}
+    player_pose = event.get("player_pose")
+    if not isinstance(player_pose, dict):
+        player_pose = {}
+    map_state = event.get("map_state")
+    if not isinstance(map_state, dict):
+        map_state = {}
+    navigation = event.get("navigation")
+    if not isinstance(navigation, dict):
+        navigation = {}
+    detections = event.get("detections")
+    if not isinstance(detections, dict):
+        detections = {}
+    player_map_norm = player_pose.get("map_norm")
+    if not isinstance(player_map_norm, (list, tuple)) or len(player_map_norm) < 2:
+        player_map_norm = [None, None]
+    player_world = player_pose.get("world_pos")
+    if not isinstance(player_world, (list, tuple)) or len(player_world) < 3:
+        player_world = [None, None, None]
+    pois = map_state.get("pois")
+    if not isinstance(pois, list):
+        pois = []
+    poi_icons = [item.get("icon_id") for item in pois if isinstance(item, dict) and item.get("icon_id")]
     frame_w, frame_h = _extract_frame_size(event.get("frame_size"))
     return {
         "schema_version": event.get("schema_version", "legacy"),
@@ -111,6 +173,46 @@ def _event_to_full_row(event: dict[str, Any]) -> dict[str, Any]:
         "capture_last_error": capture.get("last_error"),
         "hud_debug_dumped": hud.get("debug_dumped"),
         "hud_fail_streak": hud.get("fail_streak"),
+        "memory_probe_status": event.get("memory_probe_status"),
+        "map_scene_id": map_state.get("scene_id"),
+        "map_is_crypt": map_state.get("is_crypt"),
+        "map_objective": map_state.get("objective"),
+        "map_objective_confidence": map_state.get("objective_confidence"),
+        "map_boss_spotted": map_state.get("boss_spotted"),
+        "map_charged_shrines": map_state.get("charged_shrines"),
+        "map_graveyard_crypt_keys": map_state.get("graveyard_crypt_keys"),
+        "player_pose_source": player_pose.get("source"),
+        "player_pose_confidence": player_pose.get("confidence"),
+        "player_pose_map_norm_x": player_map_norm[0],
+        "player_pose_map_norm_y": player_map_norm[1],
+        "player_pose_world_x": player_world[0],
+        "player_pose_world_y": player_world[1],
+        "player_pose_world_z": player_world[2],
+        "player_pose_heading_deg": player_pose.get("heading_deg"),
+        "map_open": map_state.get("map_open"),
+        "minimap_visible": map_state.get("minimap_visible"),
+        "map_biome": map_state.get("biome"),
+        "map_active_room_id": map_state.get("active_room_id"),
+        "map_poi_count": len(pois),
+        "map_poi_icons_json": json.dumps(poi_icons, ensure_ascii=False),
+        "navigation_terrain_kind": navigation.get("terrain_kind"),
+        "navigation_drop_risk": navigation.get("drop_risk"),
+        "navigation_obstacle_cost": navigation.get("obstacle_cost"),
+        "navigation_clearance": navigation.get("clearance"),
+        "navigation_nav_confidence": navigation.get("nav_confidence"),
+        "navigation_source": navigation.get("source"),
+        "navigation_slope_source": navigation.get("slope_source"),
+        "navigation_slope_delta_z": navigation.get("slope_delta_z"),
+        "navigation_escape_lane": navigation.get("escape_lane"),
+        "navigation_jump_gate": navigation.get("jump_gate"),
+        "navigation_slide_gate": navigation.get("slide_gate"),
+        "navigation_lanes_json": json.dumps(navigation.get("lanes", []), ensure_ascii=False),
+        "enemy_classes_json": json.dumps(detections.get("enemy_classes", []), ensure_ascii=False),
+        "projectile_classes_json": json.dumps(detections.get("projectile_classes", []), ensure_ascii=False),
+        "world_objects_json": json.dumps(detections.get("world_objects", []), ensure_ascii=False),
+        "hazards_json": json.dumps(detections.get("hazards", []), ensure_ascii=False),
+        "detection_sources_json": json.dumps(event.get("detection_sources", {}), ensure_ascii=False),
+        "source_confidence_json": json.dumps(event.get("source_confidence", {}), ensure_ascii=False),
     }
 
 

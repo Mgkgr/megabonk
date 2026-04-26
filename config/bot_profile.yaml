@@ -18,7 +18,7 @@ runtime:
   hud_debug_min_interval_s: 15.0
   event_log_path: logs/runtime_events.jsonl
   event_log_interval_s: 0.2
-  event_schema_version: runtime_events_v2
+  event_schema_version: runtime_events_v4
   upgrade_space_cooldown_s: 0.3
   cam_yaw_pixels: 160
   restart_cooldown_s: 3.5
@@ -41,6 +41,16 @@ detection:
   use_onnx: false
   onnx_model_path: ''
   scene_memory_ttl_s: 2.0
+  asset_refs_dir: art_refs/megabonk_unity_extracts
+  enemy_catalog_path: config/enemy_catalog.json
+  world_catalog_path: config/world_catalog.json
+  projectile_catalog_path: config/projectile_catalog.json
+  ocr_lexicon_path: config/ocr_lexicon.json
+  memory_signatures_path: config/memory_signatures.json
+  minimap_enabled: true
+  memory_probe_enabled: true
+  memory_poll_interval_s: 0.25
+  enemy_classifier_mode: hybrid
 mvp_policy:
   chest_policy: never_open
   auto_pick_upgrade_with_space: true
@@ -54,6 +64,12 @@ max_policy:
   bunny_hop_enabled: true
   sliding_enabled: true
   collect_shrines_and_statues: true
+navigation:
+  profile: cautious
+  lane_count: 5
+  drop_risk_threshold: 0.58
+  downhill_z_threshold: 0.18
+  memory_required_for_slide: true
 autopilot:
   click_cooldown_s: 0.5
   template_thresholds: {}

@@ -1,6 +1,6 @@
 def build_regions(width, height):
-    time_x0, time_y0 = 70, 60
-    time_x1, time_y1 = 170, 100
+    time_x0, time_y0 = 28, 61
+    time_x1, time_y1 = 155, 102
     return {
         "REG_MAIN_PLAY": (
             int(0.40 * width),

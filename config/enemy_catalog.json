@@ -1,0 +1,227 @@
+[
+  {
+    "entity_id": "athena",
+    "kind": "enemy",
+    "display_name": "Athena",
+    "aliases": ["athena", "t_athena_default", "Athena", "Athena1"],
+    "preview_relpath": "enemies/t_athena_default.png",
+    "threat_tier": 2.0,
+    "metadata": {"family": "athena", "variant": "default", "mesh_relpath": "meshes/AthenaAlt.obj", "silhouette_relpath": "silhouettes/AthenaAlt.png"}
+  },
+  {
+    "entity_id": "amog",
+    "kind": "enemy",
+    "display_name": "Amog",
+    "aliases": ["amog", "t_amog_default", "AmogDefault"],
+    "preview_relpath": "enemies/t_amog_default.png",
+    "threat_tier": 1.8,
+    "metadata": {"family": "amog", "variant": "default"}
+  },
+  {
+    "entity_id": "bandit",
+    "kind": "enemy",
+    "display_name": "Bandit",
+    "aliases": ["bandit", "t_bandit_default", "BanditDefault", "FBX_BanditStatue_Color"],
+    "preview_relpath": "enemies/t_bandit_default.png",
+    "threat_tier": 2.0,
+    "metadata": {"family": "bandit", "variant": "default", "mesh_relpath": "meshes/Bandit.obj", "silhouette_relpath": "silhouettes/Bandit.png"}
+  },
+  {
+    "entity_id": "birdo",
+    "kind": "enemy",
+    "display_name": "Birdo",
+    "aliases": ["birdo", "t_birdo_default", "Birdo", "Birdo1"],
+    "preview_relpath": "enemies/t_birdo_default.png",
+    "threat_tier": 2.0,
+    "metadata": {"family": "birdo", "variant": "default", "mesh_relpath": "meshes/BirdoAlt.obj", "silhouette_relpath": "silhouettes/BirdoAlt.png"}
+  },
+  {
+    "entity_id": "bloodmage",
+    "kind": "enemy",
+    "display_name": "BloodMage",
+    "aliases": ["bloodmage", "blood", "t_bloodmage_default", "BloodMageDefault", "FBX_BloodMage_Color"],
+    "preview_relpath": "enemies/t_bloodmage_default.png",
+    "threat_tier": 3.0,
+    "metadata": {"family": "bloodmage", "variant": "default", "damage_type": "blood", "mesh_relpath": "meshes/BloodMage.obj", "silhouette_relpath": "silhouettes/BloodMage.png"}
+  },
+  {
+    "entity_id": "ghost",
+    "kind": "enemy",
+    "display_name": "Ghost",
+    "aliases": ["ghost", "t_ghost_default", "GhostDefault", "Ghost", "FBX_Ghost_Color"],
+    "preview_relpath": "enemies/t_ghost_default.png",
+    "threat_tier": 3.0,
+    "metadata": {"family": "ghost", "variant": "default", "scene_tags": ["generatedmap", "crypt"], "mesh_relpath": "meshes/Ghost.obj", "silhouette_relpath": "silhouettes/Ghost.png"}
+  },
+  {
+    "entity_id": "knight",
+    "kind": "enemy",
+    "display_name": "Knight",
+    "aliases": ["knight", "Knight_Default", "Knight", "t_knight_ghost"],
+    "preview_relpath": "enemies/Knight_Default.png",
+    "threat_tier": 3.0,
+    "metadata": {"family": "knight", "variant": "default", "mesh_relpath": "meshes/Knight.obj", "silhouette_relpath": "silhouettes/Knight.png"}
+  },
+  {
+    "entity_id": "monke",
+    "kind": "enemy",
+    "display_name": "Monke",
+    "aliases": ["monke", "Monke", "t_monke_default", "MonkeDefault"],
+    "preview_relpath": "enemies/t_monke_default.png",
+    "threat_tier": 2.0,
+    "metadata": {"family": "monke", "variant": "default", "mesh_relpath": "meshes/Monke.obj", "silhouette_relpath": "silhouettes/Monke.png"}
+  },
+  {
+    "entity_id": "orc",
+    "kind": "enemy",
+    "display_name": "Orc",
+    "aliases": ["orc", "fbx_orc_Color", "Orc"],
+    "preview_relpath": "enemies/fbx_orc_Color.png",
+    "threat_tier": 3.0,
+    "metadata": {"family": "orc", "variant": "default", "mesh_relpath": "meshes/Orc.obj", "silhouette_relpath": "silhouettes/Orc.png"}
+  },
+  {
+    "entity_id": "foxwizard",
+    "kind": "enemy",
+    "display_name": "FoxWizard",
+    "aliases": ["fox", "foxwizard", "FBX_FoxWizard_Color", "Fox_Default"],
+    "preview_relpath": "enemies/FBX_FoxWizard_Color.png",
+    "threat_tier": 4.0,
+    "metadata": {"family": "foxwizard", "variant": "default", "mesh_relpath": "meshes/FoxWizard.obj", "silhouette_relpath": "silhouettes/FoxWizard.png"}
+  },
+  {
+    "entity_id": "shadyguy",
+    "kind": "enemy",
+    "display_name": "ShadyGuy",
+    "aliases": ["shady", "shadyguy", "fbx_ShadyGuy_ColorCommon"],
+    "preview_relpath": "enemies/fbx_ShadyGuy_ColorCommon.png",
+    "threat_tier": 2.0,
+    "metadata": {"family": "shadyguy", "variant": "common", "mesh_relpath": "meshes/ShadyGuy.obj", "silhouette_relpath": "silhouettes/ShadyGuy.png"}
+  },
+  {
+    "entity_id": "cowboy",
+    "kind": "enemy",
+    "display_name": "Cowboy",
+    "aliases": ["cowboy", "t_cowboy_default", "RobotCowboy"],
+    "preview_relpath": "enemies/t_cowboy_default.png",
+    "threat_tier": 2.4,
+    "metadata": {"family": "cowboy", "variant": "default", "mesh_relpath": "meshes/CowboyLow.obj", "silhouette_relpath": "silhouettes/CowboyLow.png"}
+  },
+  {
+    "entity_id": "corrupted_knight",
+    "kind": "enemy",
+    "display_name": "CorruptedKnight",
+    "aliases": ["corruptedknight", "CorruptedKnight", "FBX_CorruptedKnight2_Color"],
+    "preview_relpath": "enemies/FBX_CorruptedKnight2_Color.png",
+    "threat_tier": 4.2,
+    "metadata": {"family": "corrupted_knight", "variant": "default", "scene_tags": ["boss", "crypt"]}
+  },
+  {
+    "entity_id": "monster_bee",
+    "kind": "enemy",
+    "display_name": "MonsterBee",
+    "aliases": ["monster_bee", "Monster_Bee_Color", "Monster Bee_Color"],
+    "preview_relpath": "enemies/Monster_Bee_Color.png",
+    "threat_tier": 2.6,
+    "metadata": {"family": "monster_bee", "variant": "default"}
+  },
+  {
+    "entity_id": "calcium",
+    "kind": "boss",
+    "display_name": "Calcium",
+    "aliases": ["calcium", "bossCalcium", "t_calcium_default"],
+    "preview_relpath": "enemies/t_calcium_default.png",
+    "threat_tier": 5.0,
+    "metadata": {"family": "calcium", "variant": "default", "scene_tags": ["boss"], "mesh_relpath": "meshes/Calcium.obj", "silhouette_relpath": "silhouettes/Calcium.png"}
+  },
+  {
+    "entity_id": "megachad",
+    "kind": "boss",
+    "display_name": "Megachad",
+    "aliases": ["megachad", "bossChad", "t_megachad_default"],
+    "preview_relpath": "enemies/t_megachad_default.png",
+    "threat_tier": 5.0,
+    "metadata": {"family": "megachad", "variant": "default", "scene_tags": ["boss"]}
+  },
+  {
+    "entity_id": "golem_boss",
+    "kind": "boss",
+    "display_name": "GolemBoss",
+    "aliases": ["golem_boss", "FBX_GolemBoss_Color"],
+    "preview_relpath": "enemies/FBX_GolemBoss_Color.png",
+    "threat_tier": 4.8,
+    "metadata": {"family": "golem_boss", "variant": "default", "scene_tags": ["boss", "finalbossmap"]}
+  },
+  {
+    "entity_id": "bossfox",
+    "kind": "boss",
+    "display_name": "BossFox",
+    "aliases": ["bossfox", "bossFox"],
+    "preview_relpath": "enemies/bossFox.png",
+    "threat_tier": 4.8,
+    "metadata": {"family": "bossfox", "variant": "default", "scene_tags": ["boss", "finalbossmap"]}
+  },
+  {
+    "entity_id": "bossknight",
+    "kind": "boss",
+    "display_name": "BossKnight",
+    "aliases": ["bossknight", "bossKnight"],
+    "preview_relpath": "enemies/bossKnight.png",
+    "threat_tier": 4.8,
+    "metadata": {"family": "bossknight", "variant": "default", "scene_tags": ["boss", "finalbossmap"]}
+  },
+  {
+    "entity_id": "bosscl4nk",
+    "kind": "boss",
+    "display_name": "BossCl4nk",
+    "aliases": ["bosscl4nk", "bossCl4nk"],
+    "preview_relpath": "enemies/bossCl4nk.png",
+    "threat_tier": 4.8,
+    "metadata": {"family": "bosscl4nk", "variant": "default", "scene_tags": ["boss", "finalbossmap"]}
+  },
+  {
+    "entity_id": "ghostboss",
+    "kind": "boss",
+    "display_name": "GhostBoss",
+    "aliases": ["ghostboss", "GhostBoss", "GhostKing"],
+    "preview_relpath": "enemies/FBX_Ghost_Color.png",
+    "threat_tier": 4.7,
+    "metadata": {"family": "ghostboss", "variant": "default", "scene_tags": ["boss", "crypt"]}
+  },
+  {
+    "entity_id": "dicehead",
+    "kind": "enemy",
+    "display_name": "Dicehead",
+    "aliases": ["dicehead", "t_dicehead_ghost"],
+    "preview_relpath": "enemies/t_dicehead_ghost.png",
+    "threat_tier": 2.5,
+    "metadata": {"family": "dicehead", "variant": "ghost", "scene_tags": ["crypt"]}
+  },
+  {
+    "entity_id": "hover_ghost",
+    "kind": "enemy",
+    "display_name": "HoverGhost",
+    "aliases": ["hover_ghost", "t_hover_ghost"],
+    "preview_relpath": "enemies/t_hover_ghost.png",
+    "threat_tier": 2.6,
+    "metadata": {"family": "hover_ghost", "variant": "ghost", "scene_tags": ["crypt"]}
+  },
+  {
+    "entity_id": "ninja",
+    "kind": "enemy",
+    "display_name": "Ninja",
+    "aliases": ["ninja", "t_ninja_ghost"],
+    "preview_relpath": "enemies/t_ninja_ghost.png",
+    "threat_tier": 2.4,
+    "metadata": {"family": "ninja", "variant": "ghost", "scene_tags": ["crypt"]}
+  },
+  {
+    "entity_id": "robinette",
+    "kind": "enemy",
+    "display_name": "Robinette",
+    "aliases": ["robinette", "t_robinette_ghost"],
+    "preview_relpath": "enemies/t_robinette_ghost.png",
+    "threat_tier": 2.8,
+    "metadata": {"family": "robinette", "variant": "ghost", "scene_tags": ["crypt"]}
+  }
+]
