@@ -76,6 +76,8 @@
 ## Changelog
 
 ### 2026-04-26
+- Задачи 1-2: `run_runtime_bot.py` теперь резолвит `templates`, `art_refs` и `config/*.json` от корня проекта, вычисленного по `--config`, а не от каталога `config/`.
+- Добавлены тесты на резолвинг runtime-ресурсов и CLI-пути шаблонов при явном `--config`, включая запуск вне корня репозитория.
 - Задача 15: добавлено явное логирование деградаций в `run_runtime_bot.py`, `megabonk_bot/memory_probe.py`, `megabonk_bot/ui_ocr.py`, `megabonk_bot/runtime/event_logger.py`, `megabonk_bot/runtime/input_controller.py`.
 - Сужена обработка некорректного `runtime.state` до `ValueError`, добавлены fallback-логи для overlay callback, overlay bbox и закрытия `world_probe`.
 - Добавлены тесты на логирование ошибок OCR, memory probe, закрытия event log и release key-path.

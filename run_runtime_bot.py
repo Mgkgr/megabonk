@@ -496,6 +496,22 @@ def _resolve_optional_path(raw_path: str | None, *, base_dir: Path) -> Path | No
     return (base_dir / path).resolve()
 
 
+def _resolve_project_base_dir(config_path: Path | None) -> Path:
+    if config_path is None:
+        return Path.cwd().resolve()
+    resolved_config_path = config_path.resolve()
+    for candidate in resolved_config_path.parents:
+        config_dir = candidate / "config"
+        if not config_dir.is_dir():
+            continue
+        try:
+            resolved_config_path.relative_to(config_dir)
+        except ValueError:
+            continue
+        return candidate.resolve()
+    return resolved_config_path.parent.resolve()
+
+
 def _load_optional_json(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
         return {}
@@ -538,7 +554,7 @@ def run(args) -> None:
     di.FAILSAFE = False
 
     config_path = Path(args.config).resolve() if args.config else None
-    config_base_dir = config_path.parent if config_path else Path(__file__).resolve().parent
+    resource_base_dir = _resolve_project_base_dir(config_path)
     config = load_config(config_path)
     runtime_cfg = config["runtime"]
     detect_cfg = config["detection"]
@@ -566,7 +582,12 @@ def run(args) -> None:
     overlay_topmost_enabled = bool(runtime_cfg.get("overlay_topmost", True))
     overlay_transparent = bool(runtime_cfg.get("overlay_transparent", True))
     window_title = str(args.window or runtime_cfg["window_title"])
-    templates_dir = str(_resolve_optional_path(str(args.templates_dir or runtime_cfg["templates_dir"]), base_dir=config_base_dir))
+    templates_dir = str(
+        _resolve_optional_path(
+            str(args.templates_dir or runtime_cfg["templates_dir"]),
+            base_dir=resource_base_dir,
+        )
+    )
     capture_backend = str(args.capture_backend or runtime_cfg.get("capture_backend", "auto"))
     if args.window_focus_interval_s is None:
         window_focus_interval_s = float(runtime_cfg.get("window_focus_interval_s", 0.25))
@@ -585,12 +606,30 @@ def run(args) -> None:
         )
     regions = build_regions(bbox["width"], bbox["height"])
     templates = load_templates(templates_dir)
-    asset_refs_dir = _resolve_optional_path(str(detect_cfg.get("asset_refs_dir", "")), base_dir=config_base_dir)
-    enemy_catalog_path = _resolve_optional_path(str(detect_cfg.get("enemy_catalog_path", "")), base_dir=config_base_dir)
-    world_catalog_path = _resolve_optional_path(str(detect_cfg.get("world_catalog_path", "")), base_dir=config_base_dir)
-    projectile_catalog_path = _resolve_optional_path(str(detect_cfg.get("projectile_catalog_path", "")), base_dir=config_base_dir)
-    ocr_lexicon_path = _resolve_optional_path(str(detect_cfg.get("ocr_lexicon_path", "")), base_dir=config_base_dir)
-    memory_signatures_path = _resolve_optional_path(str(detect_cfg.get("memory_signatures_path", "")), base_dir=config_base_dir)
+    asset_refs_dir = _resolve_optional_path(
+        str(detect_cfg.get("asset_refs_dir", "")),
+        base_dir=resource_base_dir,
+    )
+    enemy_catalog_path = _resolve_optional_path(
+        str(detect_cfg.get("enemy_catalog_path", "")),
+        base_dir=resource_base_dir,
+    )
+    world_catalog_path = _resolve_optional_path(
+        str(detect_cfg.get("world_catalog_path", "")),
+        base_dir=resource_base_dir,
+    )
+    projectile_catalog_path = _resolve_optional_path(
+        str(detect_cfg.get("projectile_catalog_path", "")),
+        base_dir=resource_base_dir,
+    )
+    ocr_lexicon_path = _resolve_optional_path(
+        str(detect_cfg.get("ocr_lexicon_path", "")),
+        base_dir=resource_base_dir,
+    )
+    memory_signatures_path = _resolve_optional_path(
+        str(detect_cfg.get("memory_signatures_path", "")),
+        base_dir=resource_base_dir,
+    )
     catalogs = load_curated_catalogs(
         asset_refs_dir=asset_refs_dir,
         enemy_catalog_path=enemy_catalog_path,

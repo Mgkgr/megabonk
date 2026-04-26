@@ -1,6 +1,7 @@
 import pytest
 
 from megabonk_bot.config import load_config
+from run_runtime_bot import _resolve_optional_path, _resolve_project_base_dir
 
 
 def test_load_config_defaults():
@@ -147,3 +148,75 @@ def test_load_config_autopilot_heuristic_critical_fields(tmp_path, field, value)
     )
     config = load_config(cfg_path)
     assert config["autopilot"]["heuristic"][field] == value
+
+
+def test_runtime_resource_paths_resolve_from_project_root_with_explicit_config(tmp_path, monkeypatch):
+    pytest.importorskip("yaml")
+    repo_root = tmp_path / "repo"
+    config_dir = repo_root / "config"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "bot_profile.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "runtime:",
+                "  templates_dir: templates",
+                "detection:",
+                "  asset_refs_dir: art_refs/megabonk_unity_extracts",
+                "  enemy_catalog_path: config/enemy_catalog.json",
+                "  world_catalog_path: config/world_catalog.json",
+                "  projectile_catalog_path: config/projectile_catalog.json",
+                "  ocr_lexicon_path: config/ocr_lexicon.json",
+                "  memory_signatures_path: config/memory_signatures.json",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    monkeypatch.chdir(outside_cwd)
+
+    config = load_config(config_path)
+    base_dir = _resolve_project_base_dir(config_path)
+
+    assert base_dir == repo_root.resolve()
+    assert _resolve_optional_path(config["runtime"]["templates_dir"], base_dir=base_dir) == (
+        repo_root / "templates"
+    ).resolve()
+    assert _resolve_optional_path(config["detection"]["asset_refs_dir"], base_dir=base_dir) == (
+        repo_root / "art_refs" / "megabonk_unity_extracts"
+    ).resolve()
+    assert _resolve_optional_path(config["detection"]["enemy_catalog_path"], base_dir=base_dir) == (
+        repo_root / "config" / "enemy_catalog.json"
+    ).resolve()
+    assert _resolve_optional_path(config["detection"]["world_catalog_path"], base_dir=base_dir) == (
+        repo_root / "config" / "world_catalog.json"
+    ).resolve()
+    assert _resolve_optional_path(
+        config["detection"]["projectile_catalog_path"],
+        base_dir=base_dir,
+    ) == (repo_root / "config" / "projectile_catalog.json").resolve()
+    assert _resolve_optional_path(config["detection"]["ocr_lexicon_path"], base_dir=base_dir) == (
+        repo_root / "config" / "ocr_lexicon.json"
+    ).resolve()
+    assert _resolve_optional_path(
+        config["detection"]["memory_signatures_path"],
+        base_dir=base_dir,
+    ) == (repo_root / "config" / "memory_signatures.json").resolve()
+
+
+def test_runtime_cli_template_override_resolves_from_project_root_with_explicit_config(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    config_dir = repo_root / "config"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "bot_profile.yaml"
+    config_path.write_text("runtime:\n  step_hz: 12\n", encoding="utf-8")
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    monkeypatch.chdir(outside_cwd)
+
+    base_dir = _resolve_project_base_dir(config_path)
+
+    assert _resolve_optional_path("templates/custom", base_dir=base_dir) == (
+        repo_root / "templates" / "custom"
+    ).resolve()
