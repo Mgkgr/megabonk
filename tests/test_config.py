@@ -16,6 +16,14 @@ def test_load_config_defaults():
     assert config["runtime"]["event_schema_version"] == "runtime_events_v4"
     assert config["runtime"]["window_focus_interval_s"] == 0.25
     assert config["runtime"]["event_log_interval_s"] == 0.2
+    assert config["runtime"]["performance_budget_enabled"] is True
+    assert config["runtime"]["performance_budget_warn_interval_s"] == 5.0
+    assert config["runtime"]["performance_budget_ms"] == {
+        "capture": 8.0,
+        "hud": 2.0,
+        "scene_analysis": 45.0,
+        "overlay": 18.0,
+    }
     assert config["mvp_policy"]["map_scan_interval_ticks"] == 180
     assert config["detection"]["asset_refs_dir"] == "art_refs/megabonk_unity_extracts"
     assert config["detection"]["enemy_catalog_path"] == "config/enemy_catalog.json"
@@ -108,6 +116,27 @@ def test_load_config_rejects_invalid_capture_backend(tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="runtime.capture_backend"):
+        load_config(cfg_path)
+
+
+def test_load_config_rejects_invalid_performance_budget_stage(tmp_path):
+    pytest.importorskip("yaml")
+    cfg_path = tmp_path / "invalid_performance_budget.yaml"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "runtime:",
+                "  performance_budget_ms:",
+                "    capture: 8.0",
+                "    hud: 2.0",
+                "    scene_analysis: 45.0",
+                "    overlay: 18.0",
+                "    input: 3.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="runtime.performance_budget_ms"):
         load_config(cfg_path)
 
 

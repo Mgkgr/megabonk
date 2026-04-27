@@ -186,6 +186,7 @@ def build_runtime_event(
     hud_debug_dumped: bool = False,
     hud_fail_streak: int = 0,
     navigation_context=None,
+    performance: dict[str, Any] | None = None,
     schema_version: str = RUNTIME_EVENT_SCHEMA_VERSION,
 ) -> dict[str, Any]:
     event = {
@@ -256,4 +257,6 @@ def build_runtime_event(
         }
     if schema_version == "runtime_events_v4":
         event["navigation"] = _serialize_navigation_context(navigation_context)
+        if performance is not None:
+            event["performance"] = performance
     return event

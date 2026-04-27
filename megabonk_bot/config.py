@@ -33,6 +33,16 @@ class RuntimeConfig:
     event_log_path: str = "logs/runtime_events.jsonl"
     event_log_interval_s: float = 0.2
     event_schema_version: str = "runtime_events_v4"
+    performance_budget_enabled: bool = True
+    performance_budget_warn_interval_s: float = 5.0
+    performance_budget_ms: dict[str, float] = field(
+        default_factory=lambda: {
+            "capture": 8.0,
+            "hud": 2.0,
+            "scene_analysis": 45.0,
+            "overlay": 18.0,
+        }
+    )
     upgrade_space_cooldown_s: float = 0.3
     cam_yaw_pixels: int = 160
     restart_cooldown_s: float = 3.5
@@ -230,6 +240,12 @@ def _validate_config(data: dict[str, Any]) -> None:
     runtime_hud_policy = _must_have(runtime, "runtime", "hud_debug_save_policy")
     runtime_event_schema_version = _must_have(runtime, "runtime", "event_schema_version")
     runtime_capture_log_errors = _must_have(runtime, "runtime", "capture_log_errors")
+    runtime_performance_budget_enabled = _must_have(
+        runtime,
+        "runtime",
+        "performance_budget_enabled",
+    )
+    runtime_performance_budget = _must_have(runtime, "runtime", "performance_budget_ms")
 
     _must_be_type("runtime.step_hz", runtime_step_hz, int)
     _must_be_positive("runtime.step_hz", runtime_step_hz)
@@ -245,6 +261,7 @@ def _validate_config(data: dict[str, Any]) -> None:
         "hud_debug_min_interval_s",
         "window_focus_interval_s",
         "upgrade_space_cooldown_s",
+        "performance_budget_warn_interval_s",
         "restart_cooldown_s",
         "restart_hold_s",
         "restart_wait_timeout_s",
@@ -273,6 +290,34 @@ def _validate_config(data: dict[str, Any]) -> None:
         raise ValueError(
             "runtime.event_schema_version must be one of "
             "runtime_events_v1|runtime_events_v2|runtime_events_v3|runtime_events_v4"
+        )
+    _must_be_type(
+        "runtime.performance_budget_enabled",
+        runtime_performance_budget_enabled,
+        bool,
+    )
+    _must_be_type("runtime.performance_budget_ms", runtime_performance_budget, dict)
+    budget_stage_names = {"capture", "hud", "scene_analysis", "overlay"}
+    unknown_budget_stages = set(runtime_performance_budget) - budget_stage_names
+    if unknown_budget_stages:
+        raise ValueError(
+            "runtime.performance_budget_ms contains unknown stages: "
+            f"{sorted(unknown_budget_stages)}"
+        )
+    for stage_name in budget_stage_names:
+        value = _must_have(
+            runtime_performance_budget,
+            "runtime.performance_budget_ms",
+            stage_name,
+        )
+        _must_be_type(
+            f"runtime.performance_budget_ms.{stage_name}",
+            value,
+            (int, float),
+        )
+        _must_be_non_negative(
+            f"runtime.performance_budget_ms.{stage_name}",
+            float(value),
         )
 
     detection_grid_rows = _must_have(detection, "detection", "grid_rows")

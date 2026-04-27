@@ -75,6 +75,12 @@
 
 ## Changelog
 
+### 2026-04-28
+- Задача 5: зафиксирован runtime performance budget по стадиям `capture`, `HUD`, `scene analysis`, `overlay` и вычисляемому бюджету тика от `runtime.step_hz`.
+- `runtime_events_v4` теперь может писать блок `performance` со stage timings, лимитами и превышениями; при превышении бюджета runtime логирует throttled warning.
+- Добавлен сценарий `scripts/profile_runtime_budget.py`, который строит измеримый baseline на `screen.png` и сохраняет JSON-сводку в `logs/runtime_performance_baseline.json`.
+- Добавлены тесты на расчёт budget/baseline, валидацию `runtime.performance_budget_ms` и запись performance-блока в runtime event.
+
 ### 2026-04-26
 - Задачи 1-2: `run_runtime_bot.py` теперь резолвит `templates`, `art_refs` и `config/*.json` от корня проекта, вычисленного по `--config`, а не от каталога `config/`.
 - Добавлены тесты на резолвинг runtime-ресурсов и CLI-пути шаблонов при явном `--config`, включая запуск вне корня репозитория.

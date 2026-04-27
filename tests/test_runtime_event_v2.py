@@ -211,3 +211,49 @@ def test_runtime_event_v4_contains_navigation_block():
     assert event["navigation"]["terrain_kind"] == "downhill"
     assert event["navigation"]["source"] == "hybrid"
     assert event["navigation"]["slide_gate"] == "allowed_slide_downhill"
+
+
+def test_runtime_event_v4_contains_performance_budget_block():
+    performance = {
+        "stages_ms": {
+            "capture": 2.0,
+            "hud": 0.2,
+            "scene_analysis": 20.0,
+            "overlay": 4.0,
+            "tick": 31.0,
+        },
+        "budget_ms": {
+            "capture": 8.0,
+            "hud": 2.0,
+            "scene_analysis": 45.0,
+            "overlay": 18.0,
+            "tick": 83.333,
+        },
+        "over_budget_ms": {},
+        "within_budget": True,
+    }
+    event = build_runtime_event(
+        ts=1.0,
+        mode=SimpleNamespace(value="ACTIVE"),
+        frame_id=1,
+        screen="RUNNING",
+        snapshot=_make_snapshot(),
+        hud_values={"gold": 77},
+        action=_FakeAction(),
+        action_reason="test",
+        restart_event=None,
+        safe_sector="center",
+        boss_prep=False,
+        boss_name=None,
+        preferred_direction="center",
+        threats=[],
+        loop_start=0.0,
+        step_hz=12,
+        dt=1 / 12,
+        window_title="Megabonk",
+        frame_width=1280,
+        frame_height=720,
+        performance=performance,
+        schema_version="runtime_events_v4",
+    )
+    assert event["performance"] == performance

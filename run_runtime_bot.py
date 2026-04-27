@@ -34,6 +34,11 @@ from megabonk_bot.runtime.overlay import (
     draw_runtime_overlay as _runtime_draw_runtime_overlay,
     handle_overlay_mouse_event as _runtime_handle_overlay_mouse_event,
 )
+from megabonk_bot.runtime.perf_budget import (
+    build_performance_sample,
+    format_over_budget,
+    normalize_performance_budget_ms,
+)
 from megabonk_bot.runtime.recovery import RecoveryState, decide_recovery_action
 
 cv2 = None
@@ -337,6 +342,7 @@ def build_runtime_event(
     hud_debug_dumped: bool = False,
     hud_fail_streak: int = 0,
     navigation_context=None,
+    performance: dict[str, Any] | None = None,
     schema_version: str = RUNTIME_EVENT_SCHEMA_VERSION,
 ) -> dict[str, Any]:
     return _build_runtime_event(
@@ -365,6 +371,7 @@ def build_runtime_event(
         hud_debug_dumped=hud_debug_dumped,
         hud_fail_streak=hud_fail_streak,
         navigation_context=navigation_context,
+        performance=performance,
         schema_version=schema_version,
     )
 
@@ -579,6 +586,14 @@ def run(args) -> None:
     capture_log_errors = bool(runtime_cfg.get("capture_log_errors", True))
     hud_ocr_every_s = float(runtime_cfg.get("hud_ocr_every_s", 0.8))
     objective_ocr_every_s = float(runtime_cfg.get("objective_ocr_every_s", 1.2))
+    performance_budget_enabled = bool(runtime_cfg.get("performance_budget_enabled", True))
+    performance_budget_warn_interval_s = float(
+        runtime_cfg.get("performance_budget_warn_interval_s", 5.0)
+    )
+    performance_budget_ms = normalize_performance_budget_ms(
+        runtime_cfg.get("performance_budget_ms"),
+        tick_budget_ms=dt * 1000.0,
+    )
     event_schema_version = str(
         runtime_cfg.get("event_schema_version", RUNTIME_EVENT_SCHEMA_VERSION)
     )
@@ -708,6 +723,7 @@ def run(args) -> None:
     map_scan_tick = 0
     run_started_ts = time.time()
     capture_warn_limiter = RateLimiter(interval_s=5.0)
+    performance_warn_limiter = RateLimiter(interval_s=performance_budget_warn_interval_s)
     overlay_topmost_applied = False
     overlay_transparent_applied = False
     overlay_borderless_applied = False
@@ -725,6 +741,8 @@ def run(args) -> None:
     try:
         while True:
             loop_start = time.perf_counter()
+            performance_stages_ms: dict[str, float] = {}
+            should_quit = False
             hotkey_toggle, hotkey_panic = hotkeys.poll()
             toggle = bool(hotkey_toggle or pending_toggle or overlay_controls.get("toggle"))
             panic = bool(hotkey_panic or pending_panic or overlay_controls.get("panic"))
@@ -746,10 +764,14 @@ def run(args) -> None:
                     release_all_keys()
                     navigation_planner.reset()
 
+            stage_start = time.perf_counter()
             frame = cap.grab()
             capture_diag = cap.get_capture_diagnostics()
             capture_bad_grab_count = int(capture_diag.get("bad_grab_count", 0))
             capture_last_error = capture_diag.get("last_error")
+            performance_stages_ms["capture"] = (
+                time.perf_counter() - stage_start
+            ) * 1000.0
             maybe_warn_capture_error(
                 capture_last_error=capture_last_error,
                 capture_bad_grab_count=capture_bad_grab_count,
@@ -784,12 +806,17 @@ def run(args) -> None:
             screen = autopilot.detect_screen(frame)
             is_dead = screen == "DEAD" or (screen != "RUNNING" and is_death_like_frame(frame))
             is_upgrade = _is_upgrade_dialog(frame, templates, regions)
+            stage_start = time.perf_counter()
             hud_cache.submit(frame)
             objective_cache.submit(frame)
             hud_values = hud_cache.snapshot()
             objective_ui = objective_cache.snapshot()
+            performance_stages_ms["hud"] = (
+                time.perf_counter() - stage_start
+            ) * 1000.0
             probe_result = world_probe.sample(now_ts=time.time())
 
+            stage_start = time.perf_counter()
             analysis = analyze_scene(
                 frame,
                 templates=templates,
@@ -806,6 +833,9 @@ def run(args) -> None:
                 enemy_classifier_mode=str(detect_cfg.get("enemy_classifier_mode", "hybrid")),
                 minimap_enabled=bool(detect_cfg.get("minimap_enabled", True)),
             )
+            performance_stages_ms["scene_analysis"] = (
+                time.perf_counter() - stage_start
+            ) * 1000.0
 
             analysis.setdefault("projectiles", [])
             onnx_detections: list[ObjectDetection] = []
@@ -991,43 +1021,7 @@ def run(args) -> None:
                 set_move(0)
                 release_all_keys()
 
-            now = time.time()
-            if now - last_event_log_ts >= log_interval_s:
-                last_event_log_ts = now
-                event = build_runtime_event(
-                    ts=now,
-                    mode=mode,
-                    frame_id=frame_id,
-                    screen=screen,
-                    snapshot=snapshot,
-                    hud_values=hud_values,
-                    action=action,
-                    action_reason=action.reason,
-                    restart_event=restart_event,
-                    safe_sector=snapshot.safe_sector,
-                    boss_prep=boss_prep,
-                    boss_name=boss_name,
-                    preferred_direction=preferred_direction,
-                    threats=threats,
-                    loop_start=loop_start,
-                    step_hz=step_hz,
-                    dt=dt,
-                    window_title=window_title,
-                    frame_width=w,
-                    frame_height=h,
-                    capture_bad_grab_count=capture_bad_grab_count,
-                    capture_last_error=(
-                        str(capture_last_error)
-                        if capture_last_error is not None
-                        else None
-                    ),
-                    hud_debug_dumped=bool(hud_values.get("debug_dumped", False)),
-                    hud_fail_streak=int(hud_values.get("hud_fail_streak", 0) or 0),
-                    navigation_context=navigation_context,
-                    schema_version=event_schema_version,
-                )
-                logger.log(event)
-
+            stage_start = time.perf_counter()
             if overlay_enabled:
                 overlay, button_rects = _draw_runtime_overlay(
                     frame,
@@ -1083,11 +1077,69 @@ def run(args) -> None:
                     overlay_topmost_applied = _set_overlay_topmost(overlay_window)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
-                    break
+                    should_quit = True
                 if key in (ord("s"), ord("S"), ord(" ")):
                     pending_toggle = True
                 elif key in (ord("p"), ord("P")):
                     pending_panic = True
+            performance_stages_ms["overlay"] = (
+                time.perf_counter() - stage_start
+            ) * 1000.0
+
+            performance_sample = None
+            if performance_budget_enabled:
+                tick_ms = (time.perf_counter() - loop_start) * 1000.0
+                performance_sample = build_performance_sample(
+                    performance_stages_ms,
+                    budget_ms=performance_budget_ms,
+                    tick_ms=tick_ms,
+                )
+                if performance_sample["over_budget_ms"] and performance_warn_limiter.allow():
+                    LOGGER.warning(
+                        "Runtime performance budget exceeded: %s",
+                        format_over_budget(performance_sample),
+                    )
+
+            now = time.time()
+            if now - last_event_log_ts >= log_interval_s:
+                last_event_log_ts = now
+                event = build_runtime_event(
+                    ts=now,
+                    mode=mode,
+                    frame_id=frame_id,
+                    screen=screen,
+                    snapshot=snapshot,
+                    hud_values=hud_values,
+                    action=action,
+                    action_reason=action.reason,
+                    restart_event=restart_event,
+                    safe_sector=snapshot.safe_sector,
+                    boss_prep=boss_prep,
+                    boss_name=boss_name,
+                    preferred_direction=preferred_direction,
+                    threats=threats,
+                    loop_start=loop_start,
+                    step_hz=step_hz,
+                    dt=dt,
+                    window_title=window_title,
+                    frame_width=w,
+                    frame_height=h,
+                    capture_bad_grab_count=capture_bad_grab_count,
+                    capture_last_error=(
+                        str(capture_last_error)
+                        if capture_last_error is not None
+                        else None
+                    ),
+                    hud_debug_dumped=bool(hud_values.get("debug_dumped", False)),
+                    hud_fail_streak=int(hud_values.get("hud_fail_streak", 0) or 0),
+                    navigation_context=navigation_context,
+                    performance=performance_sample,
+                    schema_version=event_schema_version,
+                )
+                logger.log(event)
+
+            if should_quit:
+                break
 
             elapsed = time.perf_counter() - loop_start
             if elapsed < dt:

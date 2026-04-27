@@ -13,15 +13,27 @@ def point_in_rect(x: int, y: int, rect: Optional[tuple[int, int, int, int]]) -> 
 def handle_overlay_mouse_event(cv2, event: int, x: int, y: int, state: Any) -> None:
     if not isinstance(state, dict):
         return
-    if event not in {
-        getattr(cv2, "EVENT_LBUTTONDOWN", -1),
-        getattr(cv2, "EVENT_LBUTTONUP", -2),
-    }:
+    down_event = getattr(cv2, "EVENT_LBUTTONDOWN", -1)
+    up_event = getattr(cv2, "EVENT_LBUTTONUP", -2)
+    if event not in {down_event, up_event}:
         return
     rects = state.get("rects", {})
+    button = None
     if point_in_rect(int(x), int(y), rects.get("toggle")):
-        state["toggle"] = True
+        button = "toggle"
     elif point_in_rect(int(x), int(y), rects.get("panic")):
+        button = "panic"
+
+    if event == down_event:
+        state["_mouse_down_button"] = button
+        return
+
+    pressed_button = state.pop("_mouse_down_button", None)
+    if button is None or button != pressed_button:
+        return
+    if button == "toggle":
+        state["toggle"] = True
+    elif button == "panic":
         state["panic"] = True
 
 

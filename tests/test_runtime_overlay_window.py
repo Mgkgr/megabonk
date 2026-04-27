@@ -56,7 +56,7 @@ class _FakeUser32:
         return 1
 
 
-def test_handle_overlay_mouse_event_triggers_toggle_on_left_click():
+def test_handle_overlay_mouse_event_triggers_toggle_once_on_full_left_click():
     state = {
         "toggle": False,
         "panic": False,
@@ -68,11 +68,16 @@ def test_handle_overlay_mouse_event_triggers_toggle_on_left_click():
 
     handle_overlay_mouse_event(_FakeCv2, _FakeCv2.EVENT_LBUTTONDOWN, 25, 20, state)
 
+    assert state["toggle"] is False
+    assert state["panic"] is False
+
+    handle_overlay_mouse_event(_FakeCv2, _FakeCv2.EVENT_LBUTTONUP, 25, 20, state)
+
     assert state["toggle"] is True
     assert state["panic"] is False
 
 
-def test_handle_overlay_mouse_event_triggers_panic_on_left_release():
+def test_handle_overlay_mouse_event_triggers_panic_once_on_full_left_click():
     state = {
         "toggle": False,
         "panic": False,
@@ -82,10 +87,32 @@ def test_handle_overlay_mouse_event_triggers_panic_on_left_release():
         },
     }
 
+    handle_overlay_mouse_event(_FakeCv2, _FakeCv2.EVENT_LBUTTONDOWN, 25, 60, state)
+
+    assert state["toggle"] is False
+    assert state["panic"] is False
+
     handle_overlay_mouse_event(_FakeCv2, _FakeCv2.EVENT_LBUTTONUP, 25, 60, state)
 
     assert state["toggle"] is False
     assert state["panic"] is True
+
+
+def test_handle_overlay_mouse_event_ignores_release_on_different_button():
+    state = {
+        "toggle": False,
+        "panic": False,
+        "rects": {
+            "toggle": (10, 10, 100, 30),
+            "panic": (10, 50, 100, 30),
+        },
+    }
+
+    handle_overlay_mouse_event(_FakeCv2, _FakeCv2.EVENT_LBUTTONDOWN, 25, 20, state)
+    handle_overlay_mouse_event(_FakeCv2, _FakeCv2.EVENT_LBUTTONUP, 25, 60, state)
+
+    assert state["toggle"] is False
+    assert state["panic"] is False
 
 
 def test_ensure_overlay_window_creates_resizable_window(monkeypatch):

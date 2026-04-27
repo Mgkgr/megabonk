@@ -20,6 +20,13 @@ runtime:
   event_log_path: logs/runtime_events.jsonl
   event_log_interval_s: 0.2
   event_schema_version: runtime_events_v4
+  performance_budget_enabled: true
+  performance_budget_warn_interval_s: 5.0
+  performance_budget_ms:
+    capture: 8.0
+    hud: 2.0
+    scene_analysis: 45.0
+    overlay: 18.0
   upgrade_space_cooldown_s: 0.3
   cam_yaw_pixels: 160
   restart_cooldown_s: 3.5
