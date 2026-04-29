@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from megabonk_bot.asset_catalog import load_curated_catalogs
 from megabonk_bot.config import DEFAULT_CONFIG, dump_default_config_yaml, load_config
-from megabonk_bot.memory_probe import ExternalProcessProbe, NullProbe
+from megabonk_bot.memory_probe import ExternalProcessProbe, NullProbe, WorldStateProbe
 from megabonk_bot.navigation import StatefulNavigationPlanner
 from megabonk_bot.runtime.event_logger import (
     JsonlEventLogger,
@@ -296,17 +296,18 @@ class WinHotkeyPoller:
         if self._user32 is None:
             self.enabled = False
 
-    def _pressed(self, vk: int) -> bool:
+    def _key_state(self, vk: int) -> tuple[bool, bool]:
         if not self.enabled or self._user32 is None:
-            return False
-        # Старший бит: клавиша сейчас нажата.
-        return bool(self._user32.GetAsyncKeyState(vk) & 0x8000)
+            return False, False
+        state = int(self._user32.GetAsyncKeyState(vk))
+        # High bit: currently held. Low bit: pressed since the previous query.
+        return bool(state & 0x8000), bool(state & 0x0001)
 
     def _edge_down(self, vk: int) -> bool:
-        now = self._pressed(vk)
+        now, pressed_since_last_query = self._key_state(vk)
         prev = self._prev.get(vk, False)
         self._prev[vk] = now
-        return now and not prev
+        return pressed_since_last_query or (now and not prev)
 
     def poll(self) -> tuple[bool, bool]:
         if not self.enabled:
@@ -530,6 +531,25 @@ def _load_optional_json(path: Path | None) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _build_world_probe(
+    *,
+    enabled: bool,
+    window_title: str,
+    poll_interval_s: float,
+    signatures_path: Path | None,
+) -> WorldStateProbe:
+    if not enabled:
+        return NullProbe()
+    signatures = _load_optional_json(signatures_path)
+    if not signatures:
+        return NullProbe()
+    return ExternalProcessProbe(
+        window_title=window_title,
+        poll_interval_s=poll_interval_s,
+        signatures=signatures,
+    )
+
+
 def run(args) -> None:
     global cv2
     global di
@@ -601,6 +621,7 @@ def run(args) -> None:
     overlay_window = str(runtime_cfg["overlay_window"])
     overlay_topmost_enabled = bool(runtime_cfg.get("overlay_topmost", True))
     overlay_transparent = bool(runtime_cfg.get("overlay_transparent", True))
+    overlay_redraw_interval_ticks = max(1, int(runtime_cfg.get("overlay_redraw_interval_ticks", 1)))
     window_title = str(args.window or runtime_cfg["window_title"])
     templates_dir = str(
         _resolve_optional_path(
@@ -657,14 +678,12 @@ def run(args) -> None:
         projectile_catalog_path=projectile_catalog_path,
         ocr_lexicon_path=ocr_lexicon_path,
     )
-    if bool(detect_cfg.get("memory_probe_enabled", True)):
-        world_probe = ExternalProcessProbe(
-            window_title=window_title,
-            poll_interval_s=float(detect_cfg.get("memory_poll_interval_s", 0.25)),
-            signatures=_load_optional_json(memory_signatures_path),
-        )
-    else:
-        world_probe = NullProbe()
+    world_probe = _build_world_probe(
+        enabled=bool(detect_cfg.get("memory_probe_enabled", True)),
+        window_title=window_title,
+        poll_interval_s=float(detect_cfg.get("memory_poll_interval_s", 0.25)),
+        signatures_path=memory_signatures_path,
+    )
     autopilot = AutoPilot(
         templates=templates,
         regions=regions,
@@ -734,6 +753,7 @@ def run(args) -> None:
     pending_toggle = False
     pending_panic = False
     last_scene_signature: tuple[str | None, str | None, bool | None] | None = None
+    last_overlay_frame = None
 
     def _on_overlay_mouse(event, x, y, _flags, state):
         _runtime_handle_overlay_mouse_event(cv2, event, x, y, state)
@@ -793,6 +813,7 @@ def run(args) -> None:
                         width=int(w),
                         height=int(h),
                     )
+                    last_overlay_frame = None
                 regions = build_regions(w, h)
                 hud_cache.set_regions(regions)
                 autopilot = AutoPilot(
@@ -831,7 +852,11 @@ def run(args) -> None:
                 enemy_min_area=float(detect_cfg["enemy_min_area"]),
                 interact_threshold=float(detect_cfg["interact_threshold"]),
                 enemy_classifier_mode=str(detect_cfg.get("enemy_classifier_mode", "hybrid")),
-                minimap_enabled=bool(detect_cfg.get("minimap_enabled", True)),
+                minimap_enabled=bool(detect_cfg.get("minimap_enabled", False)),
+                projectiles_enabled=bool(detect_cfg.get("projectiles_enabled", False)),
+                world_objects_enabled=bool(detect_cfg.get("world_objects_enabled", False)),
+                world_object_families=tuple(detect_cfg.get("world_object_families", [])),
+                analysis_scale=float(detect_cfg.get("analysis_scale", 1.0)),
             )
             performance_stages_ms["scene_analysis"] = (
                 time.perf_counter() - stage_start
@@ -839,13 +864,15 @@ def run(args) -> None:
 
             analysis.setdefault("projectiles", [])
             onnx_detections: list[ObjectDetection] = []
+            projectiles_enabled = bool(detect_cfg.get("projectiles_enabled", False))
             if onnx_detector is not None and onnx_detector.enabled:
                 onnx_detections = onnx_detector.detect(frame)
                 analysis.setdefault("enemy_classes", [])
                 for det in onnx_detections:
                     lowered = str(det.label).lower()
                     if "projectile" in lowered:
-                        analysis["projectiles"].append(det)
+                        if projectiles_enabled:
+                            analysis["projectiles"].append(det)
                     else:
                         analysis["enemy_classes"].append(
                             TrackedEntity(
@@ -1023,58 +1050,64 @@ def run(args) -> None:
 
             stage_start = time.perf_counter()
             if overlay_enabled:
-                overlay, button_rects = _draw_runtime_overlay(
-                    frame,
-                    analysis,
-                    snapshot,
-                    mode=mode,
-                    action_reason=action.reason,
-                    hud_values=hud_values,
-                    hud_regions=regions,
-                    navigation_context=navigation_context,
-                    transparent_canvas=overlay_transparent,
+                redraw_overlay = (
+                    last_overlay_frame is None
+                    or (frame_id % overlay_redraw_interval_ticks) == 0
                 )
-                overlay_controls["rects"] = button_rects
-                cv2.imshow(overlay_window, overlay)
-                if not overlay_mouse_callback_set and not overlay_mouse_callback_failed:
-                    try:
-                        cv2.setMouseCallback(overlay_window, _on_overlay_mouse, overlay_controls)
-                        overlay_mouse_callback_set = True
-                    except Exception:
-                        LOGGER.warning("Failed to bind overlay mouse callback", exc_info=True)
-                        overlay_mouse_callback_failed = True
-                        overlay_mouse_callback_set = False
-                if overlay_transparent:
-                    try:
-                        game_bbox = cap.get_bbox()
-                    except Exception:
-                        if not overlay_bbox_error_logged:
-                            LOGGER.warning(
-                                "Failed to read game window bbox for overlay sync; using capture bbox fallback",
-                                exc_info=True,
-                            )
-                            overlay_bbox_error_logged = True
-                        game_bbox = bbox
-                    _resize_overlay_window(
-                        overlay_window,
-                        width=int(game_bbox.get("width", w)),
-                        height=int(game_bbox.get("height", h)),
+                if redraw_overlay:
+                    overlay, button_rects = _draw_runtime_overlay(
+                        frame,
+                        analysis,
+                        snapshot,
+                        mode=mode,
+                        action_reason=action.reason,
+                        hud_values=hud_values,
+                        hud_regions=regions,
+                        navigation_context=navigation_context,
+                        transparent_canvas=overlay_transparent,
                     )
-                    _sync_overlay_to_game_window(
-                        overlay_window,
-                        game_bbox,
-                        topmost=overlay_topmost_enabled,
-                    )
-                    if not overlay_borderless_applied:
-                        overlay_borderless_applied = _set_overlay_borderless(overlay_window)
-                    if not overlay_transparent_applied:
-                        overlay_transparent_applied = _set_overlay_colorkey_transparent(
+                    last_overlay_frame = overlay
+                    overlay_controls["rects"] = button_rects
+                    cv2.imshow(overlay_window, overlay)
+                    if not overlay_mouse_callback_set and not overlay_mouse_callback_failed:
+                        try:
+                            cv2.setMouseCallback(overlay_window, _on_overlay_mouse, overlay_controls)
+                            overlay_mouse_callback_set = True
+                        except Exception:
+                            LOGGER.warning("Failed to bind overlay mouse callback", exc_info=True)
+                            overlay_mouse_callback_failed = True
+                            overlay_mouse_callback_set = False
+                    if overlay_transparent:
+                        try:
+                            game_bbox = cap.get_bbox()
+                        except Exception:
+                            if not overlay_bbox_error_logged:
+                                LOGGER.warning(
+                                    "Failed to read game window bbox for overlay sync; using capture bbox fallback",
+                                    exc_info=True,
+                                )
+                                overlay_bbox_error_logged = True
+                            game_bbox = bbox
+                        _resize_overlay_window(
                             overlay_window,
-                            colorkey=(0, 0, 0),
+                            width=int(game_bbox.get("width", w)),
+                            height=int(game_bbox.get("height", h)),
                         )
-                    overlay_topmost_applied = overlay_topmost_enabled
-                elif not overlay_topmost_applied and overlay_topmost_enabled:
-                    overlay_topmost_applied = _set_overlay_topmost(overlay_window)
+                        _sync_overlay_to_game_window(
+                            overlay_window,
+                            game_bbox,
+                            topmost=overlay_topmost_enabled,
+                        )
+                        if not overlay_borderless_applied:
+                            overlay_borderless_applied = _set_overlay_borderless(overlay_window)
+                        if not overlay_transparent_applied:
+                            overlay_transparent_applied = _set_overlay_colorkey_transparent(
+                                overlay_window,
+                                colorkey=(0, 0, 0),
+                            )
+                        overlay_topmost_applied = overlay_topmost_enabled
+                    elif not overlay_topmost_applied and overlay_topmost_enabled:
+                        overlay_topmost_applied = _set_overlay_topmost(overlay_window)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     should_quit = True

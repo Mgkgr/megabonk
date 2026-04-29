@@ -116,3 +116,50 @@ def test_load_curated_catalogs_loads_previews_icons_silhouettes_and_lexicon(tmp_
     assert catalogs.projectiles[0].damage_type == "blood"
     assert catalogs.ocr_lexicon.normalize["objective arrow"] == "objective"
     assert len(catalogs.minimap_icon_entries()) == 1
+
+
+def test_load_curated_catalogs_attaches_dbg_hud_enemy_samples(tmp_path):
+    asset_refs = tmp_path / "refs"
+    enemies_dir = asset_refs / "enemies"
+    enemies_dir.mkdir(parents=True)
+    (tmp_path / "dbg_hud").mkdir(parents=True)
+
+    preview = np.zeros((16, 16, 3), dtype=np.uint8)
+    preview[:, :] = (255, 0, 255)
+    extra = np.zeros((18, 18, 3), dtype=np.uint8)
+    extra[:, :] = (0, 220, 0)
+
+    cv2.imwrite(str(enemies_dir / "orc_main.png"), preview)
+    cv2.imwrite(str(tmp_path / "dbg_hud" / "3orc.png"), extra)
+
+    enemy_manifest_path = tmp_path / "enemy_catalog.json"
+    enemy_manifest_path.write_text(
+        json.dumps(
+            [
+                {
+                    "entity_id": "orc",
+                    "kind": "enemy",
+                    "display_name": "Orc",
+                    "aliases": ["orc", "fbx_orc_Color"],
+                    "preview_relpath": "enemies/orc_main.png",
+                    "threat_tier": 3.0,
+                    "metadata": {"family": "orc", "variant": "default"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    world_manifest_path = tmp_path / "world_catalog.json"
+    world_manifest_path.write_text("[]", encoding="utf-8")
+
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=asset_refs,
+        enemy_catalog_path=enemy_manifest_path,
+        world_catalog_path=world_manifest_path,
+    )
+
+    assert len(catalogs.enemies) == 1
+    assert catalogs.enemies[0].preview_size == (16, 16)
+    assert catalogs.enemies[0].extra_preview_sizes == ((18, 18),)
+    assert catalogs.enemies[0].extra_preview_paths[0].name == "3orc.png"
+    assert len(catalogs.enemies[0].preview_samples) == 2

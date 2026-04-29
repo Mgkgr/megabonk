@@ -123,6 +123,41 @@ def _serialize_map_state(snapshot) -> dict[str, Any] | None:
     }
 
 
+def _serialize_local_map(snapshot) -> dict[str, Any] | None:
+    local_map = getattr(snapshot, "local_map", None)
+    if local_map is None:
+        return None
+    return {
+        "rows": int(getattr(local_map, "rows", 0)),
+        "cols": int(getattr(local_map, "cols", 0)),
+        "source": getattr(local_map, "source", "screen_cv"),
+        "confidence": float(getattr(local_map, "confidence", 0.0)),
+        "cells": [
+            {
+                "row": int(getattr(cell, "row", 0)),
+                "col": int(getattr(cell, "col", 0)),
+                "label": getattr(cell, "label", "surface"),
+                "rect": list(getattr(cell, "rect", ())),
+                "score": float(getattr(cell, "score", 0.0)),
+            }
+            for cell in getattr(local_map, "cells", ()) or ()
+        ],
+        "enemies": [
+            {
+                "label": getattr(enemy, "label", "enemy"),
+                "entity_type": getattr(enemy, "entity_type", "enemy"),
+                "row": int(getattr(enemy, "row", 0)),
+                "col": int(getattr(enemy, "col", 0)),
+                "rect": list(getattr(enemy, "rect", ())),
+                "score": float(getattr(enemy, "score", 0.0)),
+                "source": getattr(enemy, "source", "screen_cv"),
+                "entity_id": getattr(enemy, "entity_id", None),
+            }
+            for enemy in getattr(local_map, "enemies", ()) or ()
+        ],
+    }
+
+
 def _serialize_navigation_context(navigation_context) -> dict[str, Any] | None:
     if navigation_context is None:
         return None
@@ -249,6 +284,7 @@ def build_runtime_event(
         event["detections"]["hazards"] = _serialize_detection_list(getattr(snapshot, "hazards", []))
         event["player_pose"] = _serialize_player_pose(snapshot)
         event["map_state"] = _serialize_map_state(snapshot)
+        event["local_map"] = _serialize_local_map(snapshot)
         event["memory_probe_status"] = getattr(snapshot, "memory_probe_status", "disabled")
         event["detection_sources"] = dict(getattr(snapshot, "detection_sources", {}) or {})
         event["source_confidence"] = {

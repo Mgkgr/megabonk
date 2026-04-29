@@ -115,12 +115,16 @@ def draw_runtime_overlay(
             "projectile_classes": analysis.get("projectile_classes", []),
             "world_objects": analysis.get("world_objects", []),
             "hazards": analysis.get("hazards", []),
+            "local_map": analysis.get("local_map"),
         }
     canvas = draw_recognition_overlay(
         base_frame,
         overlay_analysis,
         hud_values=hud_overlay_values,
         hud_regions=hud_regions,
+        show_grid=not transparent_canvas,
+        show_grid_labels=False,
+        show_legend=False,
     )
     h, _ = canvas.shape[:2]
     button_rects = build_overlay_button_rects(canvas.shape[1])
@@ -145,9 +149,7 @@ def draw_runtime_overlay(
     player_norm = getattr(player_pose, "map_norm", None) if player_pose is not None else None
     player_world = getattr(player_pose, "world_pos", None) if player_pose is not None else None
     enemy_classes = getattr(snapshot, "enemy_classes", [])
-    projectile_classes = getattr(snapshot, "projectile_classes", [])
-    world_objects = getattr(snapshot, "world_objects", [])
-    hazards = getattr(snapshot, "hazards", [])
+    local_map = getattr(snapshot, "local_map", None)
     scene_id = getattr(map_state, "scene_id", None) if map_state is not None else None
     objective = getattr(map_state, "objective", None) if map_state is not None else None
     is_crypt = getattr(map_state, "is_crypt", None) if map_state is not None else None
@@ -158,6 +160,13 @@ def draw_runtime_overlay(
     if player_world is not None:
         world_pos = f"{player_world[0]:.1f},{player_world[1]:.1f},{player_world[2]:.1f}"
     detection_sources = getattr(snapshot, "detection_sources", {}) or {}
+    local_map_summary = "?"
+    if local_map is not None:
+        local_map_summary = (
+            f"{getattr(local_map, 'rows', 0)}x{getattr(local_map, 'cols', 0)} "
+            f"walls={sum(1 for cell in getattr(local_map, 'cells', ()) if getattr(cell, 'label', '') == 'wall')} "
+            f"enemies={len(getattr(local_map, 'enemies', ()))}"
+        )
     time_fail = hud_values.get("time_fail_reason") or "ok"
     kills_fail = hud_values.get("kills_fail_reason") or "ok"
     nav_terrain = getattr(navigation_context, "terrain_kind", "unknown")
@@ -176,12 +185,12 @@ def draw_runtime_overlay(
         f"kills_ocr={format_float(hud_values.get('kills_ocr_ms'))}ms ({kills_fail})",
         f"nav terrain={nav_terrain} escape={nav_escape} conf={nav_conf} drop={nav_drop}",
         f"nav jump={nav_jump_gate} slide={nav_slide_gate} slope={nav_slope_source}:{nav_slope_delta}",
-        f"enemies={len(snapshot.enemies)} enemy_classes={len(enemy_classes)} projectiles={len(snapshot.projectiles)} projectile_classes={len(projectile_classes)} world={len(world_objects)} hazards={len(hazards)}",
+        f"surfaces/walls/enemies: enemies={len(snapshot.enemies)} enemy_classes={len(enemy_classes)} walls={len(snapshot.obstacles)} local_map={local_map_summary}",
         f"dead={snapshot.is_dead} upgrade={snapshot.is_upgrade} safe_sector={snapshot.safe_sector}",
         f"scene={scene_id} crypt={is_crypt} objective={objective}",
         f"map_open={map_open} minimap={minimap_visible} map_pos={map_pos} world_pos={world_pos}",
         f"probe={getattr(snapshot, 'memory_probe_status', 'disabled')} sources={detection_sources}",
-        "legend: green=surface blue=obstacle red=enemy magenta=projectile orange=world cyan=hazard yellow=hud_roi",
+        "legend: green=surface blue=wall red=enemy yellow=hud_roi",
         "controls: click START/STOP or PANIC | Q/Esc=quit",
     ]
     y = 24

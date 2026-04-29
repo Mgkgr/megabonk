@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from megabonk_bot.window_lookup import select_window_title_match
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -91,6 +93,9 @@ class ExternalProcessProbe(WorldStateProbe):
 
     def sample(self, now_ts: float | None = None) -> ProbeResult:
         now_ts = time.time() if now_ts is None else float(now_ts)
+        if not self.signatures:
+            self._last_result = ProbeResult(status="disabled", ts=now_ts)
+            return self._last_result
         if self._kernel32 is None or self._user32 is None or self._ctypes is None:
             self._last_result = ProbeResult(status="unsupported_platform", ts=now_ts)
             return self._last_result
@@ -100,13 +105,6 @@ class ExternalProcessProbe(WorldStateProbe):
         try:
             if not self._ensure_handle():
                 self._last_result = ProbeResult(status="process_not_found", ts=now_ts)
-                return self._last_result
-            if not self.signatures:
-                self._last_result = ProbeResult(
-                    status="degraded_no_signatures",
-                    ts=now_ts,
-                    details={"pid": self._pid},
-                )
                 return self._last_result
             if self._gameassembly_module is None:
                 self._gameassembly_module = self._find_module("GameAssembly.dll")
@@ -189,12 +187,41 @@ class ExternalProcessProbe(WorldStateProbe):
         return bool(self._handle)
 
     def _find_pid_by_window_title(self, title: str) -> int:
-        hwnd = self._user32.FindWindowW(None, title)
+        hwnd = self._find_hwnd_by_window_title(title)
         if not hwnd:
             return 0
         pid = self._wintypes.DWORD()
         self._user32.GetWindowThreadProcessId(hwnd, self._ctypes.byref(pid))
         return int(pid.value)
+
+    def _find_hwnd_by_window_title(self, title: str) -> int:
+        target = str(title or "").strip().lower()
+        candidates: list[tuple[int, str]] = []
+        enum_proc_type = self._ctypes.WINFUNCTYPE(
+            self._wintypes.BOOL,
+            self._wintypes.HWND,
+            self._wintypes.LPARAM,
+        )
+
+        def enum_proc(hwnd, _lparam):
+            try:
+                if not self._user32.IsWindowVisible(hwnd):
+                    return True
+                length = int(self._user32.GetWindowTextLengthW(hwnd))
+                if length <= 0:
+                    return True
+                buf = self._ctypes.create_unicode_buffer(length + 1)
+                self._user32.GetWindowTextW(hwnd, buf, length + 1)
+                window_title = str(buf.value)
+                candidates.append((int(hwnd), window_title))
+                if target == window_title.lower():
+                    return False
+            except Exception:
+                LOGGER.debug("Failed to inspect window during memory probe lookup", exc_info=True)
+            return True
+
+        self._user32.EnumWindows(enum_proc_type(enum_proc), 0)
+        return select_window_title_match(title, candidates) or 0
 
     def _find_module(self, module_name: str):
         TH32CS_SNAPMODULE = 0x00000008

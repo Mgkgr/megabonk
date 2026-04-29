@@ -218,6 +218,67 @@ def _parse_time(text):
     return int("".join(digits))
 
 
+def _hud_text_mask(roi_bgr):
+    hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array((0, 0, 135)), np.array((179, 120, 255)))
+    kernel = np.ones((2, 2), np.uint8)
+    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+
+def _classify_fast_digit(component) -> str | None:
+    _x, _y, w, h, area = component
+    if h <= 0 or w <= 0:
+        return None
+    aspect = float(w) / float(h)
+    fill = float(area) / float(w * h)
+    if aspect <= 0.48 and fill >= 0.45:
+        return "1"
+    if 0.54 <= aspect <= 0.78 and fill >= 0.60:
+        return "0"
+    if 0.50 <= aspect <= 0.82 and fill <= 0.58 and h <= 26:
+        return "4"
+    return None
+
+
+def _fast_hud_digit_text(roi_bgr, *, allow_colon=False) -> str | None:
+    if roi_bgr is None or roi_bgr.size == 0:
+        return None
+    mask = _hud_text_mask(roi_bgr)
+    num, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask, 8)
+    components = []
+    for idx in range(1, num):
+        x, y, w, h, area = [int(value) for value in stats[idx]]
+        if area < 10:
+            continue
+        if allow_colon and x < int(mask.shape[1] * 0.35) and h >= 20 and (w / max(1, h)) >= 0.80:
+            continue
+        components.append((x, y, w, h, area))
+    if not components:
+        return None
+
+    tokens = []
+    colon_x = None
+    for component in sorted(components, key=lambda item: item[0]):
+        x, _y, w, h, area = component
+        if allow_colon and w <= 8 and h <= 8 and area >= 12:
+            if colon_x is None or abs(x - colon_x) > 8:
+                tokens.append((x, ":"))
+                colon_x = x
+            continue
+        if h < 14 or area < 40:
+            continue
+        digit = _classify_fast_digit(component)
+        if digit is None:
+            return None
+        tokens.append((x, digit))
+    text = "".join(token for _x, token in sorted(tokens, key=lambda item: item[0]))
+    if not text or text == ":":
+        return None
+    if allow_colon:
+        return text if re.fullmatch(r"\d{1,2}:?\d{1,2}", text) else None
+    return text if text.isdigit() else None
+
+
 def _resolve_time_rect(frame_bgr, regions=None):
     if frame_bgr is None or frame_bgr.size == 0:
         return None, "frame_empty"
@@ -289,6 +350,17 @@ def read_hud_time(frame_bgr, regions=None, *, min_conf=45.0):
             "tesseract_cmd": None,
         }
 
+    fast_text = _fast_hud_digit_text(roi, allow_colon=True)
+    fast_time = _parse_time(fast_text or "")
+    if fast_time is not None:
+        return {
+            "time": fast_time,
+            "fail_reason": None,
+            "ocr_ms": (time.perf_counter() - t0) * 1000.0,
+            "rect": rect,
+            "tesseract_cmd": "fast_cv",
+        }
+
     pytesseract = _get_tesseract()
     if pytesseract is None:
         if _TESSERACT_LAST_ERROR_AT is not None:
@@ -356,9 +428,9 @@ def _read_hud_number(frame_bgr, *, key, regions=None, min_conf=45.0):
             "rect": None,
             "tesseract_cmd": None,
         }
-    x, y, w, h = rect
-    h_img, w_img = frame_bgr.shape[:2]
-    if w_img < x + w or h_img < y + h:
+    clipped_rect = _clip_rect_to_frame(rect, frame_bgr.shape)
+    if clipped_rect is None:
+        h_img, w_img = frame_bgr.shape[:2]
         return {
             "value": None,
             "fail_reason": f"frame_too_small:{w_img}x{h_img}",
@@ -366,6 +438,8 @@ def _read_hud_number(frame_bgr, *, key, regions=None, min_conf=45.0):
             "rect": rect,
             "tesseract_cmd": None,
         }
+    rect = clipped_rect
+    x, y, w, h = rect
     roi = frame_bgr[y : y + h, x : x + w]
     if roi.size == 0:
         return {
@@ -374,6 +448,17 @@ def _read_hud_number(frame_bgr, *, key, regions=None, min_conf=45.0):
             "ocr_ms": 0.0,
             "rect": rect,
             "tesseract_cmd": None,
+        }
+
+    fast_text = _fast_hud_digit_text(roi)
+    fast_value = _parse_int(fast_text or "")
+    if fast_value is not None:
+        return {
+            "value": fast_value,
+            "fail_reason": None,
+            "ocr_ms": (time.perf_counter() - t0) * 1000.0,
+            "rect": rect,
+            "tesseract_cmd": "fast_cv",
         }
 
     pytesseract = _get_tesseract()

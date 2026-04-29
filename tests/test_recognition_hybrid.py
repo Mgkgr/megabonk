@@ -90,6 +90,77 @@ def test_analyze_scene_classifies_enemy_and_fuses_probe(tmp_path):
     assert analysis["memory_probe_status"] == "ready"
 
 
+def test_analyze_scene_uses_dbg_hud_enemy_samples_as_extra_references(tmp_path):
+    asset_refs = tmp_path / "refs"
+    wrong_preview = np.zeros((32, 32, 3), dtype=np.uint8)
+    wrong_preview[:, :] = (255, 0, 255)
+    cv2.line(wrong_preview, (0, 0), (31, 31), (255, 255, 255), 2)
+    bandit_preview = np.zeros((32, 32, 3), dtype=np.uint8)
+    bandit_preview[:, :] = (0, 220, 0)
+    cv2.rectangle(bandit_preview, (7, 4), (25, 28), (0, 255, 255), -1)
+    dbg_orc = np.zeros((32, 32, 3), dtype=np.uint8)
+    dbg_orc[:, :] = (0, 220, 0)
+    cv2.rectangle(dbg_orc, (8, 5), (24, 27), (0, 255, 255), -1)
+
+    _write_image(asset_refs / "enemies" / "orc_main.png", wrong_preview)
+    _write_image(asset_refs / "enemies" / "bandit.png", bandit_preview)
+    _write_image(tmp_path / "dbg_hud" / "2orc.png", dbg_orc)
+
+    enemy_manifest = tmp_path / "enemy_catalog.json"
+    enemy_manifest.write_text(
+        json.dumps(
+            [
+                {
+                    "entity_id": "bandit",
+                    "kind": "enemy",
+                    "display_name": "Bandit",
+                    "aliases": ["bandit"],
+                    "preview_relpath": "enemies/bandit.png",
+                    "threat_tier": 2.0,
+                    "metadata": {"family": "bandit", "variant": "default"},
+                },
+                {
+                    "entity_id": "orc",
+                    "kind": "enemy",
+                    "display_name": "Orc",
+                    "aliases": ["orc", "fbx_orc_Color"],
+                    "preview_relpath": "enemies/orc_main.png",
+                    "threat_tier": 3.0,
+                    "metadata": {"family": "orc", "variant": "default"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    world_manifest = tmp_path / "world_catalog.json"
+    world_manifest.write_text("[]", encoding="utf-8")
+
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=asset_refs,
+        enemy_catalog_path=enemy_manifest,
+        world_catalog_path=world_manifest,
+    )
+
+    frame = np.zeros((180, 220, 3), dtype=np.uint8)
+    frame[60:92, 90:122] = dbg_orc
+
+    analysis = analyze_scene(
+        frame,
+        catalogs=catalogs,
+        regions=build_regions(220, 180),
+        probe_result=ProbeResult(status="disabled", ts=1.0),
+        templates=None,
+        enemy_hsv_lower=(35, 80, 80),
+        enemy_hsv_upper=(95, 255, 255),
+        enemy_min_area=10.0,
+        enemy_classifier_mode="catalog",
+        minimap_enabled=False,
+    )
+
+    assert any(item.entity_id == "orc" for item in analysis["enemy_classes"])
+    assert all(item.entity_id != "bandit" for item in analysis["enemy_classes"])
+
+
 def test_analyze_scene_detects_world_object_from_template(tmp_path):
     template = np.zeros((20, 20, 3), dtype=np.uint8)
     cv2.circle(template, (10, 10), 6, (255, 255, 255), -1)
@@ -130,6 +201,7 @@ def test_analyze_scene_detects_world_object_from_template(tmp_path):
         enemy_hsv_lower=(35, 80, 80),
         enemy_hsv_upper=(95, 255, 255),
         enemy_min_area=50.0,
+        world_objects_enabled=True,
     )
 
     assert any(item.entity_id == "interactable_portal" for item in analysis["world_objects"])
@@ -185,6 +257,7 @@ def test_analyze_scene_uses_icon_atlas_for_minimap_pois(tmp_path):
         enemy_hsv_lower=(35, 80, 80),
         enemy_hsv_upper=(95, 255, 255),
         enemy_min_area=40.0,
+        minimap_enabled=True,
     )
 
     assert any(poi.icon_id == "portal" for poi in analysis["map_state"].pois)
@@ -249,6 +322,7 @@ def test_analyze_scene_splits_projectiles_and_hazards(tmp_path):
         enemy_hsv_lower=(35, 80, 80),
         enemy_hsv_upper=(95, 255, 255),
         enemy_min_area=40.0,
+        projectiles_enabled=True,
     )
 
     assert any(item.entity_id == "projectile_bloodmagic" for item in analysis["projectile_classes"])
@@ -273,11 +347,47 @@ def test_analyze_scene_uses_supplied_objective_ui_without_inline_ocr():
         enemy_hsv_lower=(35, 80, 80),
         enemy_hsv_upper=(95, 255, 255),
         enemy_min_area=40.0,
+        world_objects_enabled=True,
     )
 
     assert analysis["objective_ui"] == supplied_objective
     assert analysis["map_state"].objective == "escort_the_cart"
     assert analysis["detection_sources"]["objective"] == "objective_cache"
+
+
+def test_analyze_scene_builds_seen_local_map_from_surface_walls_and_enemies():
+    frame = np.full((90, 120, 3), 80, dtype=np.uint8)
+    cv2.rectangle(frame, (60, 0), (119, 89), (255, 255, 255), 2)
+    frame[20:42, 15:37] = (0, 220, 0)
+
+    analysis = analyze_scene(
+        frame,
+        regions=build_regions(120, 90),
+        probe_result=ProbeResult(status="disabled", ts=1.0),
+        grid_rows=3,
+        grid_cols=4,
+        enemy_hsv_lower=(45, 80, 40),
+        enemy_hsv_upper=(85, 255, 255),
+        enemy_min_area=25.0,
+        projectiles_enabled=False,
+        world_objects_enabled=False,
+        minimap_enabled=False,
+    )
+
+    grid_labels = {cell.label for cell in analysis["grid"]}
+    assert grid_labels <= {"surface", "wall"}
+
+    local_map = analysis["local_map"]
+    assert local_map.rows == 3
+    assert local_map.cols == 4
+    assert {cell.label for cell in local_map.cells} <= {"surface", "wall"}
+    assert any(cell.label == "wall" for cell in local_map.cells)
+    assert len(local_map.enemies) == 1
+    assert local_map.enemies[0].entity_type == "enemy"
+    assert 0 <= local_map.enemies[0].row < local_map.rows
+    assert 0 <= local_map.enemies[0].col < local_map.cols
+    assert analysis["projectiles"] == []
+    assert analysis["world_objects"] == []
 
 
 def test_finalboss_profile_filters_loot_world_objects(tmp_path):

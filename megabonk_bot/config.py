@@ -26,6 +26,7 @@ class RuntimeConfig:
     overlay_window: str = "Megabonk Runtime Bot"
     overlay_topmost: bool = True
     overlay_transparent: bool = True
+    overlay_redraw_interval_ticks: int = 1
     hud_ocr_every_s: float = 0.8
     objective_ocr_every_s: float = 1.2
     hud_debug_save_policy: str = "on_fail_change"
@@ -55,10 +56,14 @@ class RuntimeConfig:
 class DetectionConfig:
     grid_rows: int = 12
     grid_cols: int = 20
+    analysis_scale: float = 1.0
     enemy_hsv_lower: list[int] = field(default_factory=lambda: [45, 80, 40])
     enemy_hsv_upper: list[int] = field(default_factory=lambda: [85, 255, 255])
     enemy_min_area: float = 1200.0
     interact_threshold: float = 0.65
+    projectiles_enabled: bool = False
+    world_objects_enabled: bool = False
+    world_object_families: list[str] = field(default_factory=list)
     use_onnx: bool = False
     onnx_model_path: str = ""
     scene_memory_ttl_s: float = 2.0
@@ -68,7 +73,7 @@ class DetectionConfig:
     projectile_catalog_path: str = "config/projectile_catalog.json"
     ocr_lexicon_path: str = "config/ocr_lexicon.json"
     memory_signatures_path: str = ""
-    minimap_enabled: bool = True
+    minimap_enabled: bool = False
     memory_probe_enabled: bool = True
     memory_poll_interval_s: float = 0.25
     enemy_classifier_mode: str = "hybrid"
@@ -235,6 +240,11 @@ def _validate_config(data: dict[str, Any]) -> None:
     runtime_step_hz = _must_have(runtime, "runtime", "step_hz")
     runtime_cam_yaw_pixels = _must_have(runtime, "runtime", "cam_yaw_pixels")
     runtime_restart_max_attempts = _must_have(runtime, "runtime", "restart_max_attempts")
+    runtime_overlay_redraw_interval = _must_have(
+        runtime,
+        "runtime",
+        "overlay_redraw_interval_ticks",
+    )
     runtime_capture_backend = _must_have(runtime, "runtime", "capture_backend")
     runtime_state = _must_have(runtime, "runtime", "state")
     runtime_hud_policy = _must_have(runtime, "runtime", "hud_debug_save_policy")
@@ -253,6 +263,8 @@ def _validate_config(data: dict[str, Any]) -> None:
     _must_be_non_negative("runtime.cam_yaw_pixels", runtime_cam_yaw_pixels)
     _must_be_type("runtime.restart_max_attempts", runtime_restart_max_attempts, int)
     _must_be_positive("runtime.restart_max_attempts", runtime_restart_max_attempts)
+    _must_be_type("runtime.overlay_redraw_interval_ticks", runtime_overlay_redraw_interval, int)
+    _must_be_positive("runtime.overlay_redraw_interval_ticks", runtime_overlay_redraw_interval)
 
     for seconds_key in (
         "event_log_interval_s",
@@ -322,8 +334,12 @@ def _validate_config(data: dict[str, Any]) -> None:
 
     detection_grid_rows = _must_have(detection, "detection", "grid_rows")
     detection_grid_cols = _must_have(detection, "detection", "grid_cols")
+    detection_analysis_scale = _must_have(detection, "detection", "analysis_scale")
     detection_enemy_min_area = _must_have(detection, "detection", "enemy_min_area")
     detection_interact_threshold = _must_have(detection, "detection", "interact_threshold")
+    detection_projectiles_enabled = _must_have(detection, "detection", "projectiles_enabled")
+    detection_world_objects_enabled = _must_have(detection, "detection", "world_objects_enabled")
+    detection_world_object_families = _must_have(detection, "detection", "world_object_families")
     detection_scene_memory_ttl = _must_have(detection, "detection", "scene_memory_ttl_s")
     detection_enemy_hsv_lower = _must_have(detection, "detection", "enemy_hsv_lower")
     detection_enemy_hsv_upper = _must_have(detection, "detection", "enemy_hsv_upper")
@@ -342,11 +358,19 @@ def _validate_config(data: dict[str, Any]) -> None:
     _must_be_positive("detection.grid_rows", detection_grid_rows)
     _must_be_type("detection.grid_cols", detection_grid_cols, int)
     _must_be_positive("detection.grid_cols", detection_grid_cols)
+    _must_be_type("detection.analysis_scale", detection_analysis_scale, (int, float))
+    if not 0.0 < float(detection_analysis_scale) <= 1.0:
+        raise ValueError("detection.analysis_scale must be in (0.0, 1.0]")
     _must_be_type("detection.enemy_min_area", detection_enemy_min_area, (int, float))
     _must_be_non_negative("detection.enemy_min_area", float(detection_enemy_min_area))
     _must_be_type("detection.interact_threshold", detection_interact_threshold, (int, float))
     if not 0.0 <= float(detection_interact_threshold) <= 1.0:
         raise ValueError("detection.interact_threshold must be in [0.0, 1.0]")
+    _must_be_type("detection.projectiles_enabled", detection_projectiles_enabled, bool)
+    _must_be_type("detection.world_objects_enabled", detection_world_objects_enabled, bool)
+    _must_be_type("detection.world_object_families", detection_world_object_families, list)
+    if not all(isinstance(item, str) for item in detection_world_object_families):
+        raise ValueError("detection.world_object_families must contain strings")
     _must_be_type("detection.scene_memory_ttl_s", detection_scene_memory_ttl, (int, float))
     _must_be_non_negative("detection.scene_memory_ttl_s", float(detection_scene_memory_ttl))
     _must_be_type("detection.memory_poll_interval_s", detection_memory_poll_interval, (int, float))

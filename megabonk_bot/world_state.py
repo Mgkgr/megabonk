@@ -43,6 +43,37 @@ class MapPoi:
 
 
 @dataclass(frozen=True)
+class LocalMapCell:
+    row: int
+    col: int
+    label: str
+    rect: tuple[int, int, int, int]
+    score: float
+
+
+@dataclass(frozen=True)
+class LocalMapEntity:
+    label: str
+    entity_type: str
+    row: int
+    col: int
+    rect: tuple[int, int, int, int]
+    score: float
+    source: str = "screen_cv"
+    entity_id: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalMap:
+    rows: int = 0
+    cols: int = 0
+    cells: tuple[LocalMapCell, ...] = ()
+    enemies: tuple[LocalMapEntity, ...] = ()
+    source: str = "screen_cv"
+    confidence: float = 0.0
+
+
+@dataclass(frozen=True)
 class PlayerPose:
     map_norm: tuple[float, float] | None = None
     world_pos: tuple[float, float, float] | None = None

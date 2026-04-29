@@ -15,6 +15,7 @@ def test_load_config_defaults():
     assert config["runtime"]["hud_debug_min_interval_s"] == 15.0
     assert config["runtime"]["event_schema_version"] == "runtime_events_v4"
     assert config["runtime"]["window_focus_interval_s"] == 0.25
+    assert config["runtime"]["overlay_redraw_interval_ticks"] == 1
     assert config["runtime"]["event_log_interval_s"] == 0.2
     assert config["runtime"]["performance_budget_enabled"] is True
     assert config["runtime"]["performance_budget_warn_interval_s"] == 5.0
@@ -26,12 +27,16 @@ def test_load_config_defaults():
     }
     assert config["mvp_policy"]["map_scan_interval_ticks"] == 180
     assert config["detection"]["asset_refs_dir"] == "art_refs/megabonk_unity_extracts"
+    assert config["detection"]["analysis_scale"] == 1.0
+    assert config["detection"]["projectiles_enabled"] is False
+    assert config["detection"]["world_objects_enabled"] is False
+    assert config["detection"]["world_object_families"] == []
     assert config["detection"]["enemy_catalog_path"] == "config/enemy_catalog.json"
     assert config["detection"]["world_catalog_path"] == "config/world_catalog.json"
     assert config["detection"]["projectile_catalog_path"] == "config/projectile_catalog.json"
     assert config["detection"]["ocr_lexicon_path"] == "config/ocr_lexicon.json"
     assert config["detection"]["memory_signatures_path"] == ""
-    assert config["detection"]["minimap_enabled"] is True
+    assert config["detection"]["minimap_enabled"] is False
     assert config["detection"]["memory_probe_enabled"] is True
     assert config["detection"]["memory_poll_interval_s"] == 0.25
     assert config["detection"]["enemy_classifier_mode"] == "hybrid"

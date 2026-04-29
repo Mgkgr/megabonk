@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import mss
 import numpy as np
 
+from megabonk_bot.window_lookup import select_window_title_match
+
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -213,8 +215,7 @@ def _grab_with_printwindow(hwnd: int, width: int, height: int):
 
 def find_hwnd_by_title_substr(title_substr: str) -> int | None:
     target = title_substr.lower().strip()
-    found = {"hwnd": None, "title": None}
-    substring_matches: list[tuple[int, str, int]] = []
+    candidates: list[tuple[int, str]] = []
 
     def enum_proc(hwnd, lparam):
         if not user32.IsWindowVisible(hwnd):
@@ -227,24 +228,16 @@ def find_hwnd_by_title_substr(title_substr: str) -> int | None:
         buf = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(hwnd, buf, length + 1)
         title = buf.value
+        candidates.append((int(hwnd), title))
 
         title_lower = title.lower()
         if target == title_lower:
-            found["hwnd"] = hwnd
-            found["title"] = title
             return False
-        if target in title_lower:
-            substring_matches.append((len(title_lower), title, hwnd))
         return True
 
     cb = WNDENUMPROC(enum_proc)
     user32.EnumWindows(cb, 0)
-    if found["hwnd"]:
-        return found["hwnd"]
-    if substring_matches:
-        substring_matches.sort(key=lambda item: item[0])
-        return substring_matches[0][2]
-    return found["hwnd"]
+    return select_window_title_match(title_substr, candidates)
 
 
 def get_client_bbox_on_screen(hwnd: int) -> dict:

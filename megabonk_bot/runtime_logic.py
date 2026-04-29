@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from megabonk_bot.world_state import MapState, PlayerPose, TrackedEntity, WorldObject
+from megabonk_bot.world_state import LocalMap, MapState, PlayerPose, TrackedEntity, WorldObject
 
 
 class BotMode(str, Enum):
@@ -37,6 +37,7 @@ class SceneSnapshot:
     hazards: list[WorldObject] = field(default_factory=list)
     player_pose: PlayerPose | None = None
     map_state: MapState | None = None
+    local_map: LocalMap | None = None
     detection_sources: dict[str, str] = field(default_factory=dict)
     source_confidence: dict[str, float] = field(default_factory=dict)
     memory_probe_status: str = "disabled"
@@ -139,7 +140,7 @@ def build_scene_snapshot(
     obstacles = [
         DetectionBox(label=cell.label, rect=cell.rect, score=float(cell.score))
         for cell in analysis.get("grid", [])
-        if getattr(cell, "label", "") == "obstacle"
+        if str(getattr(cell, "label", "")).lower() in {"obstacle", "wall"}
     ]
     interactables = [
         DetectionBox(label=item.label, rect=item.rect, score=float(item.score))
@@ -160,6 +161,9 @@ def build_scene_snapshot(
     map_state = analysis.get("map_state")
     if not isinstance(map_state, MapState):
         map_state = MapState()
+    local_map = analysis.get("local_map")
+    if not isinstance(local_map, LocalMap):
+        local_map = None
 
     safe_sector_source = enemy_classes if enemy_classes else enemies
     safe_sector = _safe_sector_from_enemies(safe_sector_source, frame_width=frame_width)
@@ -178,6 +182,7 @@ def build_scene_snapshot(
         hazards=hazards,
         player_pose=player_pose,
         map_state=map_state,
+        local_map=local_map,
         detection_sources=dict(analysis.get("detection_sources", {}) or {}),
         source_confidence={
             str(key): float(value)

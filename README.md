@@ -1,71 +1,176 @@
 # Megabonk Bot
 
-Простой практический гайд: как **настроить**, **запустить runtime-бота**, **обучить модель** и **запустить обученную модель**.
+Бот для Megabonk под Windows. Основной режим сейчас - runtime-бот: захват окна игры, CV/шаблоны, HUD/objective OCR, memory probe, навигация, recovery после смерти, overlay и JSONL-телеметрия. RL-часть на `stable-baselines3` осталась в проекте как экспериментальный режим через `MegabonkEnv`.
 
-## 1) Что есть в проекте
+Проект управляет реальным окном игры через `pydirectinput`, поэтому перед запуском проверьте hotkeys и держите под рукой `F12` panic.
 
-- `run_runtime_bot.py` — основной runtime-бот (правила + CV + recovery).
-- `train.py` — обучение PPO на `MegabonkEnv`.
-- `play.py` — запуск уже обученной PPO-модели.
-- `config/bot_profile.yaml` — ваш рабочий конфиг.
-- `make_templates.py` — нарезка шаблонов и HUD-ROI из `screen.png`.
+## Что внутри
 
-## 2) Быстрый сценарий (если хотите сразу запустить)
+- `run_runtime_bot.py` - основной runtime-бот.
+- `config/bot_profile.yaml` - рабочий профиль runtime.
+- `megabonk_bot/` - пакет с распознаванием, конфигом, runtime-логикой, overlay, navigation, memory probe и event logger.
+- `templates/` - PNG-шаблоны UI/HUD.
+- `art_refs/megabonk_unity_extracts/` - референсы и иконки для каталогов.
+- `config/*_catalog.json`, `config/ocr_lexicon.json` - каталоги врагов, объектов, снарядов и OCR-лексикон.
+- `make_templates.py` - нарезка шаблонов и HUD ROI из скриншота.
+- `scripts/profile_runtime_budget.py` - baseline производительности runtime-стадий.
+- `scripts/export_jsonl.py` - экспорт `logs/runtime_events.jsonl` в CSV.
+- `scripts/smoke_memory_probe.py` - быстрая проверка memory probe на живом окне игры.
+- `train.py`, `play.py`, `megabonk_env.py` - RL-режим.
+- `tests/` - unit-тесты.
 
-1. Установите зависимости.
-2. Сделайте `screen.png` (полный скрин окна игры).
-3. Нарежьте шаблоны (`python make_templates.py`).
-4. Запустите runtime (`python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml`).
-5. Включите бота: `F8` или кнопка `START` в оверлее.
+## Требования
 
-Если нужен именно RL-режим, переходите в разделы `6` и `7`.
+- Windows.
+- Python 3.10+.
+- Megabonk в оконном или borderless-режиме.
+- Заголовок окна должен содержать `Megabonk` или значение из `runtime.window_title`.
 
-## 3) Требования
+Зависимости пока не зафиксированы в `requirements.txt`, поэтому установка ручная:
 
-- ОС: **Windows** (управление и часть захвата завязаны на WinAPI/DirectInput).
-- Python: **3.10+**.
-- Игра Megabonk запущена в оконном/безрамочном режиме.
-- Заголовок окна игры совпадает с `runtime.window_title` (по умолчанию `Megabonk`).
-
-## 4) Установка
-
-```bash
+```powershell
 python -m venv .venv
-# PowerShell
 .\.venv\Scripts\Activate.ps1
-# или cmd
-.venv\Scripts\activate.bat
 
-pip install -U pip
-pip install numpy opencv-python mss pydirectinput gymnasium stable-baselines3 torch pillow pyyaml
+python -m pip install -U pip
+pip install numpy opencv-python mss pydirectinput gymnasium stable-baselines3 torch pillow pyyaml pytest
 ```
 
 Опционально:
 
-- OCR HUD: `pip install pytesseract` + установленный Tesseract OCR.
-- ONNX-детекция: `pip install onnxruntime`.
-
-### Проверка установки
-
-```bash
-bash scripts/smoke_check.sh
-pytest -q
+```powershell
+pip install pytesseract onnxruntime pandas UnityPy
 ```
 
-## 5) Подготовка шаблонов и HUD
+- `pytesseract` нужен для HUD/objective OCR, плюс должен быть установлен Tesseract OCR.
+- `onnxruntime` нужен только при `detection.use_onnx: true`.
+- `pandas` нужен только для `scripts/export_jsonl.py --use-pandas`.
+- `UnityPy` нужен только для `scripts/extract_megabonk_refs.py`.
 
-### 5.1 Нарезка шаблонов (обязательно для runtime)
+Если Tesseract установлен не в стандартном месте:
 
-1. Сохраните в корень проекта скрин окна игры: `screen.png`.
-2. Запустите:
-
-```bash
-python make_templates.py
+```powershell
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
 ```
 
-3. Выделите ROI мышью и задайте имя шаблона (например `tpl_play`).
+## Быстрый запуск runtime
 
-Минимальный набор, с которым стоит начинать:
+1. Запустите игру и оставьте окно видимым.
+2. Обновите `screen.png`: положите в корень проекта свежий полный скрин окна игры.
+3. При необходимости нарежьте шаблоны:
+
+```powershell
+python make_templates.py --source screen.png --outdir templates
+```
+
+4. Обновите HUD ROI для диагностики OCR:
+
+```powershell
+python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/screen_crops
+```
+
+5. Запустите runtime:
+
+```powershell
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
+```
+
+Управление:
+
+- `F8` - переключить `OFF` / `ACTIVE`.
+- `F12` - `PANIC`, отпустить зажатые клавиши.
+- В overlay: `START/STOP`, `PANIC`.
+- В окне overlay: `S` или `Space` - toggle, `P` - panic, `Q` или `Esc` - выход.
+
+Полезные варианты запуска:
+
+```powershell
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --capture-backend printwindow
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --capture-backend mss
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --no-overlay
+python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --templates-dir templates
+python run_runtime_bot.py --print-default-config
+```
+
+## Конфиг
+
+Основной файл: `config/bot_profile.yaml`.
+
+Чаще всего правятся:
+
+- `runtime.window_title` - строка поиска окна.
+- `runtime.step_hz` - частота runtime-цикла.
+- `runtime.capture_backend` - `auto`, `printwindow` или `mss`.
+- `runtime.templates_dir` - папка шаблонов.
+- `runtime.overlay_enabled`, `runtime.overlay_transparent`, `runtime.overlay_topmost` - режим overlay.
+- `runtime.hud_ocr_every_s` - частота фонового HUD OCR.
+- `runtime.objective_ocr_every_s` - частота фонового objective OCR; есть в дефолтном конфиге, даже если не указан в `bot_profile.yaml`.
+- `runtime.event_log_path` - JSONL-лог.
+- `runtime.event_schema_version` - по умолчанию `runtime_events_v4`.
+- `runtime.performance_budget_enabled` и `runtime.performance_budget_ms` - бюджет стадий `capture`, `hud`, `scene_analysis`, `overlay`.
+- `hotkeys.toggle_vk`, `hotkeys.panic_vk` - virtual-key коды hotkeys.
+- `detection.asset_refs_dir`, `detection.enemy_catalog_path`, `detection.world_catalog_path`, `detection.projectile_catalog_path`, `detection.ocr_lexicon_path` - ресурсы распознавания.
+- `detection.memory_probe_enabled`, `detection.memory_signatures_path`, `detection.memory_poll_interval_s` - memory probe.
+- `navigation.profile` - `cautious`, `balanced` или `aggressive`.
+
+Относительные пути из конфига резолвятся от корня проекта, найденного по `--config`.
+
+## Runtime-лог
+
+Runtime пишет события в:
+
+```text
+logs/runtime_events.jsonl
+```
+
+Текущая схема по умолчанию - `runtime_events_v4`. В событии есть:
+
+- `capture` - ошибки и счётчик плохих кадров.
+- `hud` - debug dump и streak OCR-фейлов.
+- `telemetry` и `telemetry_raw` - HUD-значения и диагностические OCR-поля.
+- `detections` - враги, снаряды, объекты, hazards и классы из каталогов.
+- `player_pose`, `map_state`, `memory_probe_status` - данные memory probe и карты, если доступны.
+- `navigation` - оценка полос, terrain/drop risk/clearance и gates для jump/slide.
+- `performance` - timings стадий и превышения бюджета.
+
+Экспорт в CSV:
+
+```powershell
+python scripts/export_jsonl.py logs/runtime_events.jsonl
+python scripts/export_jsonl.py logs/runtime_events.jsonl --telemetry-only
+```
+
+## Производительность
+
+Для baseline по `screen.png`:
+
+```powershell
+python scripts/profile_runtime_budget.py --config config/bot_profile.yaml --sample-frame screen.png --iterations 20
+```
+
+Для живого окна:
+
+```powershell
+python scripts/profile_runtime_budget.py --config config/bot_profile.yaml --live-window Megabonk --capture-backend auto --iterations 20
+```
+
+Результат сохраняется в `logs/runtime_performance_baseline.json`. Runtime также пишет throttled warning, если `performance_budget_enabled: true` и стадия выходит за бюджет.
+
+## Memory Probe
+
+Memory probe читает состояние внешнего процесса через WinAPI. Если `config/memory_signatures.json` пустой или сигнатуры не подходят, runtime продолжит работу в degraded-режиме, а в событиях будет соответствующий `memory_probe_status`.
+
+Проверка:
+
+```powershell
+python scripts/smoke_memory_probe.py --window Megabonk --signatures config/memory_signatures.json
+```
+
+Важная деталь: `memory_probe` и `WindowCapture` ищут одно и то же видимое окно: сначала точное совпадение без учёта регистра, затем самый короткий заголовок, содержащий заданную строку. Если probe не видит процесс, проверьте `runtime.window_title`/`--window` и `detection.memory_signatures_path`.
+
+## Шаблоны и HUD
+
+Минимальный набор шаблонов для runtime:
 
 - `tpl_play`
 - `tpl_confirm`
@@ -74,13 +179,9 @@ python make_templates.py
 - `tpl_lvl`
 - `tpl_minimap`
 
-### 5.2 Автоматическая нарезка HUD-полей для OCR (рекомендуется)
+В `templates/` уже лежат рабочие шаблоны, но после смены разрешения, DPI или UI-скейла лучше обновить `screen.png` и переснять проблемные ROI.
 
-```bash
-python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/screen_crops
-```
-
-Что получите:
+HUD debug export создаёт:
 
 - `dbg_hud/screen_crops/time.png`
 - `dbg_hud/screen_crops/kills.png`
@@ -90,165 +191,83 @@ python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/s
 - `dbg_hud/screen_crops/hud_preview.png`
 - `dbg_hud/screen_crops/hud_regions.json`
 
-## 6) Настройка перед запуском
+## RL-режим
 
-Основной конфиг: `config/bot_profile.yaml`.
+Обучение PPO:
 
-Минимум, который обычно правят:
-
-- `runtime.window_title` — заголовок окна игры.
-- `runtime.step_hz` — частота цикла (стартово 10-12).
-- `runtime.capture_backend` — `auto` / `printwindow` / `mss`.
-- `runtime.capture_log_errors` — логировать ли повторяющиеся ошибки захвата окна.
-- `runtime.templates_dir` — папка шаблонов (обычно `templates`).
-- `runtime.overlay_enabled` — показывать ли окно оверлея.
-- `runtime.overlay_transparent` — прозрачный HUD-оверлей поверх окна игры.
-- `runtime.hud_debug_save_policy` — политика сохранения HUD debug (`startup|on_fail_change|interval|off`).
-- `runtime.hud_debug_min_interval_s` — минимальный интервал между повторными HUD debug-дампами.
-- `runtime.event_schema_version` — версия схемы JSONL (`runtime_events_v2` по умолчанию, доступен `runtime_events_v1`).
-- `hotkeys.toggle_vk` / `hotkeys.panic_vk` — hotkeys (по умолчанию F8/F12).
-
-Если не уверены в значениях, оставьте дефолт и правьте только `window_title`.
-
-## 7) Запуск runtime-бота (основной боевой режим)
-
-```bash
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
-```
-
-Управление:
-
-- `F8` — переключение `OFF <-> ACTIVE`.
-- `F12` — `PANIC` (сброс зажатых клавиш).
-- В оверлее: кнопки `START/STOP` и `PANIC` мышью.
-- В оверлее: `S`/`Space` = toggle, `P` = panic, `Q`/`Esc` = выход.
-
-Полезные флаги:
-
-```bash
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --capture-backend printwindow
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --no-overlay
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --window-focus-interval-s 0.25
-```
-
-Логи:
-
-- `logs/runtime_events.jsonl` — события runtime.
-- `dbg_hud/` — debug-скрины HUD и кропы ROI (в том числе `time/kills/...`).
-
-### Диагностика захвата
-
-- В схеме `runtime_events_v2` в каждом событии есть блок `capture`:
-  - `capture.bad_grab_count`
-  - `capture.last_error`
-- При повторяющихся проблемах захвата runtime пишет rate-limited warning в stdout.
-
-### Политика HUD debug
-
-- `runtime.hud_debug_save_policy: startup` — только стартовый дамп.
-- `runtime.hud_debug_save_policy: on_fail_change` — дамп на первом фейле и при смене причины (рекомендуется).
-- `runtime.hud_debug_save_policy: interval` — дамп при фейле, но не чаще `runtime.hud_debug_min_interval_s`.
-- `runtime.hud_debug_save_policy: off` — отключить автоматические HUD debug-дампы.
-
-В `runtime_events_v2` добавлен блок `hud`:
-- `hud.debug_dumped` — был ли создан debug-дамп на текущем шаге.
-- `hud.fail_streak` — текущая серия OCR-фейлов HUD.
-
-## 8) Обучение модели (RL)
-
-Базовый запуск:
-
-```bash
+```powershell
 python train.py --window-title Megabonk --device cuda --timesteps 2000000
 ```
 
-Если CUDA недоступна:
+CPU-проверка пайплайна:
 
-```bash
-python train.py --window-title Megabonk --device cpu --timesteps 500000
-```
-
-Часто используемые параметры:
-
-- `--timesteps` — общее число шагов обучения.
-- `--step-hz` — частота шага окружения.
-- `--n-steps`, `--batch-size`, `--gamma`, `--lr` — гиперпараметры PPO.
-- `--model-out` — имя/путь итоговой модели (без `.zip` или с путём).
-
-Пример “быстрой проверки пайплайна”:
-
-```bash
+```powershell
 python train.py --window-title Megabonk --device cpu --timesteps 100000 --step-hz 8 --log-every 100
 ```
 
-Результат обучения:
-
-- файл модели, например `megabonk_ppo_cnn.zip`.
-- tensorboard-логи в `tb/`.
-
-## 9) Запуск обученной модели
-
-```bash
-python play.py --model-path megabonk_ppo_cnn --device cpu --window-title Megabonk
-```
-
-Полезно:
-
-- `--stochastic` — стохастический выбор действий.
-- `--step-hz` — синхронизация частоты с тем, на чём обучали.
-
-## 10) Рекомендуемый рабочий цикл
-
-1. Подготовить `screen.png` и шаблоны.
-2. Проверить runtime-бот в реальной игре (детекты, recovery, HUD OCR).
-3. Подкрутить `config/bot_profile.yaml` (частота, пороги, backend захвата).
-4. Запустить обучение `train.py`.
-5. Прогнать модель через `play.py`.
-6. Повторить цикл с обновлёнными шаблонами/параметрами.
-
-## 11) Частые проблемы и решения
-
-### Не находится окно игры
-
-- Проверьте `--window` и `runtime.window_title`.
-- Убедитесь, что окно игры не свернуто.
-
-### OCR HUD не работает
-
-- Установите `pytesseract`.
-- Установите Tesseract OCR.
-- При необходимости задайте переменную `TESSERACT_CMD`.
-
-PowerShell пример:
+Запуск обученной модели:
 
 ```powershell
-$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
+python play.py --model-path megabonk_ppo_cnn --device cpu --window-title Megabonk
+python play.py --model-path megabonk_ppo_cnn --device cpu --window-title Megabonk --stochastic
 ```
 
-### Бот реагирует медленно
+Модель сохраняется как `megabonk_ppo_cnn.zip`, TensorBoard-логи - в `tb/`.
 
-- Уменьшите `runtime.step_hz` (например 12 -> 10 -> 8).
-- Переснимите `screen.png` и шаблоны на текущем разрешении/DPI.
+## Проверки
+
+Unit-тесты:
+
+```powershell
+pytest -q
+```
+
+Smoke-check синтаксиса:
+
+```bash
+bash scripts/smoke_check.sh
+```
+
+`scripts/smoke_check.sh` рассчитан на Bash и `rg`; на Windows удобнее запускать его через Git Bash или WSL.
+
+## Частые проблемы
+
+Окно не найдено:
+
+- Проверьте `--window` и `runtime.window_title`.
+- Окно игры должно быть видимым, не свёрнутым.
+- Capture и memory probe используют одну стратегию поиска: точное совпадение без учёта регистра, затем shortest substring-match среди видимых окон.
+
+Чёрный или пустой кадр:
+
 - Попробуйте `--capture-backend printwindow`.
+- Попробуйте `--capture-backend mss`.
+- Перезапустите игру в borderless/windowed.
+- Проверьте DPI и переснимите `screen.png`.
 
-### Модель учится нестабильно
+OCR не даёт значения:
 
-- Сначала уменьшите `step_hz` и проверьте стабильность эпизодов.
-- Увеличьте `timesteps`.
-- Сравните поведение на `--stochastic` и детерминированном запуске.
+- Установите Tesseract OCR и `pytesseract`.
+- Проверьте `$env:TESSERACT_CMD`.
+- Сгенерируйте HUD crops через `make_templates.py --export-hud`.
+- Посмотрите `telemetry_raw` и `hud.fail_streak` в JSONL.
 
-## 12) Полезные команды
+Runtime не держит `step_hz`:
 
-Показать дефолтный конфиг:
+- Запустите `scripts/profile_runtime_budget.py`.
+- Уменьшите `runtime.step_hz`.
+- Увеличьте `runtime.hud_ocr_every_s` и `runtime.objective_ocr_every_s`.
+- Отключите overlay через `--no-overlay` для сравнения.
 
-```bash
-python run_runtime_bot.py --print-default-config
-```
+Неправильные детекты:
 
-Экспорт runtime JSONL в CSV:
+- Переснимите шаблоны под текущие разрешение и DPI.
+- Проверьте каталоги в `config/*_catalog.json`.
+- Для врагов настройте `detection.enemy_hsv_lower`, `detection.enemy_hsv_upper`, `detection.enemy_min_area`.
 
-```bash
-python scripts/export_jsonl.py logs/runtime_events.jsonl
-python scripts/export_jsonl.py logs/runtime_events.jsonl --telemetry-only
-```
+## Текущие ограничения
+
+- Нет зафиксированного dependency manifest; установка пока ручная.
+- Memory signatures требуют актуальных адресов/паттернов под текущую версию игры.
+- ONNX-детекция выключена по умолчанию.
+- RL-режим зависит от стабильности реального окна игры и не является быстрым offline-тренажёром.

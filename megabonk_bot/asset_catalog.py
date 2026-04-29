@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,9 @@ class LoadedCatalogEntry:
     preview_bgr: Any | None = None
     preview_size: tuple[int, int] | None = None
     preview_path: Path | None = None
+    extra_preview_bgrs: tuple[Any, ...] = ()
+    extra_preview_sizes: tuple[tuple[int, int], ...] = ()
+    extra_preview_paths: tuple[Path, ...] = ()
     minimap_icon_bgr: Any | None = None
     minimap_icon_size: tuple[int, int] | None = None
     minimap_icon_path: Path | None = None
@@ -133,6 +137,14 @@ class LoadedCatalogEntry:
     def silhouette_relpath(self) -> str | None:
         value = self.entry.metadata.get("silhouette_relpath")
         return str(value) if value is not None else None
+
+    @property
+    def preview_samples(self) -> tuple[Any, ...]:
+        samples = []
+        if self.preview_bgr is not None:
+            samples.append(self.preview_bgr)
+        samples.extend(item for item in self.extra_preview_bgrs if item is not None)
+        return tuple(samples)
 
 
 @dataclass(frozen=True)
@@ -237,11 +249,99 @@ def _resolve_asset_path(asset_refs_dir: Path | None, relpath: str | None) -> Pat
     return path if path.exists() else None
 
 
-def _load_entries(asset_refs_dir: Path | None, entries: tuple[CatalogEntry, ...]) -> tuple[LoadedCatalogEntry, ...]:
+def _compact_match_token(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"[^a-z]+", "", str(value).strip().lower())
+
+
+def _entry_match_tokens(entry: CatalogEntry) -> tuple[str, ...]:
+    raw_tokens = [entry.entity_id, entry.display_name, *entry.aliases]
+    family = entry.metadata.get("family")
+    if family:
+        raw_tokens.append(str(family))
+    seen = set()
+    tokens = []
+    for raw in raw_tokens:
+        token = _compact_match_token(str(raw))
+        if len(token) < 3 or token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tuple(tokens)
+
+
+def _discover_debug_samples_dir(*paths: Path | None) -> Path | None:
+    checked = set()
+    for path in paths:
+        if path is None:
+            continue
+        for base in (path.parent, path.parent.parent):
+            if base in checked:
+                continue
+            checked.add(base)
+            candidate = base / "dbg_hud"
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+    return None
+
+
+def _discover_extra_preview_paths(debug_samples_dir: Path | None, entry: CatalogEntry) -> tuple[Path, ...]:
+    if debug_samples_dir is None or not debug_samples_dir.exists():
+        return ()
+    tokens = _entry_match_tokens(entry)
+    if not tokens:
+        return ()
+    matches: list[Path] = []
+    for path in sorted(debug_samples_dir.glob("*.png")):
+        stem = _compact_match_token(path.stem)
+        if not stem:
+            continue
+        if any(token in stem or stem in token for token in tokens):
+            matches.append(path)
+    return tuple(matches)
+
+
+def _load_extra_previews(paths: tuple[Path, ...], primary_path: Path | None) -> tuple[tuple[Any, ...], tuple[tuple[int, int], ...], tuple[Path, ...]]:
+    images: list[Any] = []
+    sizes: list[tuple[int, int]] = []
+    loaded_paths: list[Path] = []
+    primary_resolved = primary_path.resolve() if primary_path is not None and primary_path.exists() else None
+    seen: set[Path] = set()
+    for path in paths:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        if primary_resolved is not None and resolved == primary_resolved:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        image, size, loaded_path = _load_image(path)
+        if image is None or size is None or loaded_path is None:
+            continue
+        images.append(image)
+        sizes.append(size)
+        loaded_paths.append(loaded_path)
+    return tuple(images), tuple(sizes), tuple(loaded_paths)
+
+
+def _load_entries(
+    asset_refs_dir: Path | None,
+    entries: tuple[CatalogEntry, ...],
+    *,
+    debug_samples_dir: Path | None = None,
+) -> tuple[LoadedCatalogEntry, ...]:
     loaded: list[LoadedCatalogEntry] = []
     for entry in entries:
         preview_path = _resolve_asset_path(asset_refs_dir, entry.preview_relpath)
         preview_bgr, preview_size, preview_path = _load_image(preview_path)
+        extra_preview_paths = _discover_extra_preview_paths(debug_samples_dir, entry)
+        extra_preview_bgrs, extra_preview_sizes, extra_preview_paths = _load_extra_previews(
+            extra_preview_paths,
+            preview_path,
+        )
 
         minimap_icon_relpath = entry.metadata.get("minimap_icon_relpath")
         minimap_icon_path = _resolve_asset_path(asset_refs_dir, str(minimap_icon_relpath) if minimap_icon_relpath else None)
@@ -257,6 +357,9 @@ def _load_entries(asset_refs_dir: Path | None, entries: tuple[CatalogEntry, ...]
                 preview_bgr=preview_bgr,
                 preview_size=preview_size,
                 preview_path=preview_path,
+                extra_preview_bgrs=extra_preview_bgrs,
+                extra_preview_sizes=extra_preview_sizes,
+                extra_preview_paths=extra_preview_paths,
                 minimap_icon_bgr=minimap_icon_bgr,
                 minimap_icon_size=minimap_icon_size,
                 minimap_icon_path=minimap_icon_path,
@@ -285,11 +388,12 @@ def load_curated_catalogs(
     enemy_entries = _read_manifest(enemy_path)
     world_entries = _read_manifest(world_path)
     projectile_entries = _read_manifest(projectile_path)
+    debug_samples_dir = _discover_debug_samples_dir(enemy_path, world_path, projectile_path)
 
     return CuratedCatalogs(
-        enemies=_load_entries(asset_refs, enemy_entries),
-        world=_load_entries(asset_refs, world_entries),
-        projectiles=_load_entries(asset_refs, projectile_entries),
+        enemies=_load_entries(asset_refs, enemy_entries, debug_samples_dir=debug_samples_dir),
+        world=_load_entries(asset_refs, world_entries, debug_samples_dir=debug_samples_dir),
+        projectiles=_load_entries(asset_refs, projectile_entries, debug_samples_dir=debug_samples_dir),
         ocr_lexicon=_read_ocr_lexicon(lexicon_path),
         asset_refs_dir=asset_refs,
         enemy_catalog_path=enemy_path,

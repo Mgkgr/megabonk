@@ -5,6 +5,7 @@ from megabonk_bot.runtime_logic import (
     build_scene_snapshot,
     choose_mvp_action,
 )
+from megabonk_bot.world_state import LocalMap
 
 
 def _box(label, rect, score=0.9):
@@ -35,6 +36,33 @@ def test_build_scene_snapshot_extracts_obstacles_and_sector():
     assert snapshot.safe_sector == "left"
     assert snapshot.lvl == 6
     assert snapshot.kills == 12
+
+
+def test_build_scene_snapshot_treats_wall_cells_as_obstacles_and_keeps_local_map():
+    local_map = LocalMap(rows=1, cols=2)
+    analysis = {
+        "enemies": [],
+        "grid": [
+            _box("surface", (0, 0, 20, 20), 0.2),
+            _box("wall", (20, 0, 20, 20), 0.8),
+        ],
+        "interactables": [],
+        "projectiles": [],
+        "local_map": local_map,
+    }
+
+    snapshot = build_scene_snapshot(
+        frame_id=10,
+        ts=10.0,
+        frame_width=80,
+        analysis=analysis,
+        hud_values={},
+        is_dead=False,
+        is_upgrade=False,
+    )
+
+    assert [item.label for item in snapshot.obstacles] == ["wall"]
+    assert snapshot.local_map == local_map
 
 
 def test_choose_mvp_action_picks_upgrade_with_space():

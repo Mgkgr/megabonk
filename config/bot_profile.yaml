@@ -14,6 +14,7 @@ runtime:
   overlay_window: Megabonk Runtime Bot
   overlay_topmost: true
   overlay_transparent: true
+  overlay_redraw_interval_ticks: 3
   hud_ocr_every_s: 0.8
   hud_debug_save_policy: on_fail_change
   hud_debug_min_interval_s: 15.0
@@ -34,8 +35,9 @@ runtime:
   restart_wait_timeout_s: 8.0
   restart_max_attempts: 2
 detection:
-  grid_rows: 12
-  grid_cols: 20
+  grid_rows: 10
+  grid_cols: 16
+  analysis_scale: 0.5
   enemy_hsv_lower:
   - 45
   - 80
@@ -46,6 +48,10 @@ detection:
   - 255
   enemy_min_area: 1200.0
   interact_threshold: 0.65
+  projectiles_enabled: false
+  world_objects_enabled: false
+  world_object_families:
+  - tome
   use_onnx: false
   onnx_model_path: ''
   scene_memory_ttl_s: 2.0
@@ -55,10 +61,10 @@ detection:
   projectile_catalog_path: config/projectile_catalog.json
   ocr_lexicon_path: config/ocr_lexicon.json
   memory_signatures_path: config/memory_signatures.json
-  minimap_enabled: true
+  minimap_enabled: false
   memory_probe_enabled: true
   memory_poll_interval_s: 0.25
-  enemy_classifier_mode: hybrid
+  enemy_classifier_mode: "off"
 mvp_policy:
   chest_policy: never_open
   auto_pick_upgrade_with_space: true

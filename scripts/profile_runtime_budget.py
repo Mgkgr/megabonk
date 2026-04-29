@@ -134,6 +134,8 @@ def main() -> None:
         "gold": None,
         "hp_ratio": None,
     }
+    overlay_redraw_interval_ticks = max(1, int(runtime_cfg.get("overlay_redraw_interval_ticks", 1)))
+    last_overlay_frame = None
     samples = []
     for frame_id in range(1, int(args.iterations) + 1):
         loop_start = time.perf_counter()
@@ -167,7 +169,11 @@ def main() -> None:
             enemy_min_area=float(detect_cfg["enemy_min_area"]),
             interact_threshold=float(detect_cfg["interact_threshold"]),
             enemy_classifier_mode=str(detect_cfg.get("enemy_classifier_mode", "hybrid")),
-            minimap_enabled=bool(detect_cfg.get("minimap_enabled", True)),
+            minimap_enabled=bool(detect_cfg.get("minimap_enabled", False)),
+            projectiles_enabled=bool(detect_cfg.get("projectiles_enabled", False)),
+            world_objects_enabled=bool(detect_cfg.get("world_objects_enabled", False)),
+            world_object_families=tuple(detect_cfg.get("world_object_families", [])),
+            analysis_scale=float(detect_cfg.get("analysis_scale", 1.0)),
         )
         stages_ms["scene_analysis"] = (time.perf_counter() - stage_start) * 1000.0
         snapshot = build_scene_snapshot(
@@ -183,17 +189,22 @@ def main() -> None:
 
         stage_start = time.perf_counter()
         if not args.no_overlay:
-            draw_runtime_overlay(
-                cv2,
-                frame,
-                analysis,
-                snapshot,
-                mode=BotMode.OFF,
-                action_reason="profile_runtime_budget",
-                hud_values=cached_hud_values,
-                hud_regions=regions,
-                transparent_canvas=False,
+            redraw_overlay = (
+                last_overlay_frame is None
+                or (frame_id % overlay_redraw_interval_ticks) == 0
             )
+            if redraw_overlay:
+                last_overlay_frame, _ = draw_runtime_overlay(
+                    cv2,
+                    frame,
+                    analysis,
+                    snapshot,
+                    mode=BotMode.OFF,
+                    action_reason="profile_runtime_budget",
+                    hud_values=cached_hud_values,
+                    hud_regions=regions,
+                    transparent_canvas=bool(runtime_cfg.get("overlay_transparent", False)),
+                )
         stages_ms["overlay"] = (time.perf_counter() - stage_start) * 1000.0
 
         samples.append(
@@ -213,6 +224,7 @@ def main() -> None:
         "iterations": int(args.iterations),
         "step_hz": step_hz,
         "overlay_profiled": not args.no_overlay,
+        "overlay_redraw_interval_ticks": overlay_redraw_interval_ticks,
     }
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

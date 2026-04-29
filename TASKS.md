@@ -76,6 +76,11 @@
 ## Changelog
 
 ### 2026-04-28
+- Задача 7: поиск процесса в `memory_probe` приведён к стратегии `WindowCapture`: точное совпадение заголовка без учёта регистра, затем самый короткий видимый substring-match.
+- Добавлен общий helper выбора окна по заголовку и тесты на substring/PID lookup для `ExternalProcessProbe`.
+- Задача 6: `memory_probe` автоматически отключается при пустом или отсутствующем `memory_signatures.json`; runtime создаёт `NullProbe` вместо `ExternalProcessProbe`.
+- `ExternalProcessProbe.sample()` больше не открывает процесс при пустом наборе сигнатур и возвращает статус `disabled` без деградированных noisy-статусов.
+- Добавлены тесты на runtime-фабрику probe и на отсутствие открытия процесса при пустых сигнатурах.
 - Задача 5: зафиксирован runtime performance budget по стадиям `capture`, `HUD`, `scene analysis`, `overlay` и вычисляемому бюджету тика от `runtime.step_hz`.
 - `runtime_events_v4` теперь может писать блок `performance` со stage timings, лимитами и превышениями; при превышении бюджета runtime логирует throttled warning.
 - Добавлен сценарий `scripts/profile_runtime_budget.py`, который строит измеримый baseline на `screen.png` и сохраняет JSON-сводку в `logs/runtime_performance_baseline.json`.

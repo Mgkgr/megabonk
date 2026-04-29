@@ -11,7 +11,16 @@ from megabonk_bot.hud import DEFAULT_HUD_REGIONS
 from megabonk_bot.memory_probe import ProbeResult
 from megabonk_bot.ui_ocr import UiTextDetection
 from megabonk_bot.vision import find_in_region
-from megabonk_bot.world_state import MapPoi, MapState, PlayerPose, TrackedEntity, WorldObject
+from megabonk_bot.world_state import (
+    LocalMap,
+    LocalMapCell,
+    LocalMapEntity,
+    MapPoi,
+    MapState,
+    PlayerPose,
+    TrackedEntity,
+    WorldObject,
+)
 
 
 @dataclass(frozen=True)
@@ -85,19 +94,14 @@ def _grid_edges(gray: np.ndarray, rows: int, cols: int) -> list[GridCell]:
             scores.append(score)
             cells.append((x0, y0, x1 - x0, y1 - y0, score))
 
-    low_thr = float(np.percentile(scores, 35)) if scores else 0.0
     high_thr = float(np.percentile(scores, 70)) if scores else 0.0
+    low_thr = float(np.percentile(scores, 35)) if scores else 0.0
     if high_thr - low_thr < 0.05:
         high_thr = low_thr + 0.05
 
     labeled = []
     for x0, y0, cw, ch, score in cells:
-        if score <= low_thr:
-            label = "surface"
-        elif score >= high_thr:
-            label = "obstacle"
-        else:
-            label = "unknown"
+        label = "wall" if score >= high_thr else "surface"
         labeled.append(GridCell(label=label, rect=(x0, y0, cw, ch), score=score))
     return labeled
 
@@ -222,6 +226,88 @@ def _dedupe_boxes(items: list, iou_thr: float = 0.45) -> list:
     return output
 
 
+def _scale_rect(
+    rect: tuple[int, int, int, int],
+    scale_x: float,
+    scale_y: float | None = None,
+) -> tuple[int, int, int, int]:
+    sy = float(scale_x if scale_y is None else scale_y)
+    sx = float(scale_x)
+    x, y, w, h = rect
+    return (
+        int(round(float(x) * sx)),
+        int(round(float(y) * sy)),
+        max(1, int(round(float(w) * sx))),
+        max(1, int(round(float(h) * sy))),
+    )
+
+
+def _rescale_labeled_boxes(items: list[LabeledBox], scale_x: float, scale_y: float) -> list[LabeledBox]:
+    if scale_x == 1.0 and scale_y == 1.0:
+        return items
+    return [
+        LabeledBox(label=item.label, rect=_scale_rect(item.rect, scale_x, scale_y), score=item.score)
+        for item in items
+    ]
+
+
+def _rescale_grid_cells(items: list[GridCell], scale_x: float, scale_y: float) -> list[GridCell]:
+    if scale_x == 1.0 and scale_y == 1.0:
+        return items
+    return [
+        GridCell(label=item.label, rect=_scale_rect(item.rect, scale_x, scale_y), score=item.score)
+        for item in items
+    ]
+
+
+def _rescale_tracked_entities(
+    items: list[TrackedEntity],
+    scale_x: float,
+    scale_y: float,
+) -> list[TrackedEntity]:
+    if scale_x == 1.0 and scale_y == 1.0:
+        return items
+    return [
+        TrackedEntity(
+            label=item.label,
+            rect=_scale_rect(item.rect, scale_x, scale_y),
+            score=item.score,
+            source=item.source,
+            entity_id=item.entity_id,
+            threat_tier=item.threat_tier,
+            family=item.family,
+            variant=item.variant,
+            metadata=dict(item.metadata),
+        )
+        for item in items
+    ]
+
+
+def _rescale_world_objects(
+    items: list[WorldObject],
+    scale_x: float,
+    scale_y: float,
+) -> list[WorldObject]:
+    if scale_x == 1.0 and scale_y == 1.0:
+        return items
+    return [
+        WorldObject(
+            label=item.label,
+            rect=_scale_rect(item.rect, scale_x, scale_y),
+            score=item.score,
+            source=item.source,
+            entity_id=item.entity_id,
+            poi_type=item.poi_type,
+            family=item.family,
+            variant=item.variant,
+            hazard_kind=item.hazard_kind,
+            icon_id=item.icon_id,
+            metadata=dict(item.metadata),
+        )
+        for item in items
+    ]
+
+
 def _dedupe_pois(items: list[MapPoi], distance_thr: float = 0.08) -> tuple[MapPoi, ...]:
     output: list[MapPoi] = []
     for item in sorted(items, key=lambda current: float(getattr(current, "score", 0.0)), reverse=True):
@@ -245,6 +331,93 @@ def _dedupe_pois(items: list[MapPoi], distance_thr: float = 0.08) -> tuple[MapPo
         if not duplicate:
             output.append(item)
     return tuple(output)
+
+
+def _grid_label_for_local_map(label: str) -> str:
+    lowered = str(label).lower()
+    if lowered in {"wall", "obstacle"}:
+        return "wall"
+    return "surface"
+
+
+def _rect_center_to_grid(
+    rect: tuple[int, int, int, int],
+    *,
+    frame_w: int,
+    frame_h: int,
+    rows: int,
+    cols: int,
+) -> tuple[int, int]:
+    x, y, w, h = rect
+    cx = float(x) + float(w) / 2.0
+    cy = float(y) + float(h) / 2.0
+    col = int((cx / max(1.0, float(frame_w))) * max(1, cols))
+    row = int((cy / max(1.0, float(frame_h))) * max(1, rows))
+    return max(0, min(max(1, rows) - 1, row)), max(0, min(max(1, cols) - 1, col))
+
+
+def build_seen_local_map(
+    *,
+    grid: list[GridCell],
+    enemies: list[TrackedEntity],
+    frame_shape: tuple[int, int, int] | tuple[int, int],
+    rows: int,
+    cols: int,
+) -> LocalMap:
+    rows = max(1, int(rows))
+    cols = max(1, int(cols))
+    frame_h = int(frame_shape[0]) if frame_shape else 0
+    frame_w = int(frame_shape[1]) if len(frame_shape) > 1 else 0
+    cells: list[LocalMapCell] = []
+    confidence_values: list[float] = []
+    for index, cell in enumerate(grid):
+        label = _grid_label_for_local_map(cell.label)
+        row = min(rows - 1, index // cols)
+        col = min(cols - 1, index % cols)
+        score = float(cell.score)
+        confidence_values.append(score if label == "wall" else 1.0 - min(1.0, score))
+        cells.append(
+            LocalMapCell(
+                row=row,
+                col=col,
+                label=label,
+                rect=cell.rect,
+                score=score,
+            )
+        )
+
+    mapped_enemies: list[LocalMapEntity] = []
+    for enemy in enemies:
+        row, col = _rect_center_to_grid(
+            enemy.rect,
+            frame_w=frame_w,
+            frame_h=frame_h,
+            rows=rows,
+            cols=cols,
+        )
+        confidence_values.append(float(enemy.score))
+        mapped_enemies.append(
+            LocalMapEntity(
+                label=enemy.label,
+                entity_type="enemy",
+                row=row,
+                col=col,
+                rect=enemy.rect,
+                score=float(enemy.score),
+                source=enemy.source,
+                entity_id=enemy.entity_id,
+            )
+        )
+
+    confidence = float(np.mean(confidence_values)) if confidence_values else 0.0
+    return LocalMap(
+        rows=rows,
+        cols=cols,
+        cells=tuple(cells),
+        enemies=tuple(mapped_enemies),
+        source="screen_cv",
+        confidence=max(0.0, min(1.0, confidence)),
+    )
 
 
 def _extract_patch(frame_bgr: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray | None:
@@ -306,7 +479,7 @@ def _entry_alias_tokens(entry: LoadedCatalogEntry) -> tuple[str, ...]:
 
 
 def _catalog_match_score(entry: LoadedCatalogEntry, *, patch: np.ndarray | None, profile: DetectorProfile) -> float:
-    texture_score = _patch_similarity(patch, entry.preview_bgr)
+    texture_score = max((_patch_similarity(patch, preview) for preview in entry.preview_samples), default=0.0)
     silhouette_score = _silhouette_similarity(patch, entry.silhouette_bgr)
     score = texture_score
     if silhouette_score > 0.0:
@@ -425,7 +598,7 @@ def enemy_classification(
     if not proposals:
         return []
     mode = str(mode or "hybrid").lower()
-    entries = tuple(item for item in (catalogs.enemies if catalogs else ()) if item.preview_bgr is not None)
+    entries = tuple(item for item in (catalogs.enemies if catalogs else ()) if item.preview_samples)
     output: list[TrackedEntity] = []
     for proposal in proposals:
         label = proposal.label
@@ -516,7 +689,7 @@ def projectile_classification(
     if not proposals:
         return [], []
     mode = str(mode or "hybrid").lower()
-    entries = tuple(item for item in (catalogs.projectiles if catalogs else ()) if item.preview_bgr is not None)
+    entries = tuple(item for item in (catalogs.projectiles if catalogs else ()) if item.preview_samples)
     projectile_classes: list[TrackedEntity] = []
     hazards: list[WorldObject] = []
     for proposal in proposals:
@@ -587,26 +760,38 @@ def world_object_detection(
     catalogs: CuratedCatalogs | None,
     interact_threshold: float,
     profile: DetectorProfile,
+    allowed_families: tuple[str, ...] | None = None,
 ) -> tuple[list[LabeledBox], list[WorldObject]]:
-    hints = {
-        "chest",
-        "coin",
-        "loot",
-        "foliant",
-        "tome",
-        "shrine",
-        "portal",
-        "altar",
-        "door",
-        "boss",
-        "key",
-        "book",
-        "crypt",
-        "grave",
-        "cage",
-        "objective",
-    }
+    allowed = {str(item).strip().lower() for item in (allowed_families or ()) if str(item).strip()}
+    if allowed:
+        hints = set(allowed)
+        if "tome" in allowed or "book" in allowed:
+            hints.update({"foliant", "tome", "book", "holybook", "itemholybook"})
+    else:
+        hints = {
+            "chest",
+            "coin",
+            "loot",
+            "foliant",
+            "tome",
+            "shrine",
+            "portal",
+            "altar",
+            "door",
+            "boss",
+            "key",
+            "book",
+            "crypt",
+            "grave",
+            "cage",
+            "objective",
+        }
+
+    catalog_entries = []
     for entry in catalogs.world if catalogs else ():
+        if allowed and str(entry.family or "").lower() not in allowed and entry.entity_id.lower() not in allowed:
+            continue
+        catalog_entries.append(entry)
         hints.update(alias.lower() for alias in entry.aliases)
         hints.update(template.lower() for template in entry.template_names)
     hits = _template_boxes(
@@ -617,7 +802,9 @@ def world_object_detection(
     )
     world_objects: list[WorldObject] = []
     for hit in hits:
-        matched = _match_catalog_entry(hit.label, catalogs.world if catalogs else ())
+        matched = _match_catalog_entry(hit.label, tuple(catalog_entries))
+        if allowed and matched is None:
+            continue
         if matched is not None:
             if not profile.allow_loot and matched.poi_type == "loot":
                 continue
@@ -933,39 +1120,83 @@ def analyze_scene(
     enemy_min_area: float = 1200.0,
     interact_threshold: float = 0.65,
     enemy_classifier_mode: str = "hybrid",
-    minimap_enabled: bool = True,
+    minimap_enabled: bool = False,
+    projectiles_enabled: bool = False,
+    world_objects_enabled: bool = False,
+    world_object_families: tuple[str, ...] | list[str] | None = None,
+    analysis_scale: float = 1.0,
 ) -> dict[str, list]:
-    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    requested_scale = float(analysis_scale or 1.0)
+    if requested_scale <= 0.0:
+        requested_scale = 1.0
+    scale = min(1.0, requested_scale)
+    if scale < 0.999:
+        work_frame = cv2.resize(
+            frame_bgr,
+            None,
+            fx=scale,
+            fy=scale,
+            interpolation=cv2.INTER_AREA,
+        )
+        scale_x = frame_bgr.shape[1] / max(1.0, float(work_frame.shape[1]))
+        scale_y = frame_bgr.shape[0] / max(1.0, float(work_frame.shape[0]))
+        scaled_enemy_min_area = max(1.0, float(enemy_min_area) * scale * scale)
+    else:
+        work_frame = frame_bgr
+        scale_x = 1.0
+        scale_y = 1.0
+        scaled_enemy_min_area = float(enemy_min_area)
+
+    gray = cv2.cvtColor(work_frame, cv2.COLOR_BGR2GRAY)
     grid = _grid_edges(gray, grid_rows, grid_cols)
     profile = _profile_from_probe(probe_result)
     proposals = enemy_proposals(
-        frame_bgr,
+        work_frame,
         enemy_hsv_lower=enemy_hsv_lower,
         enemy_hsv_upper=enemy_hsv_upper,
-        enemy_min_area=enemy_min_area,
+        enemy_min_area=scaled_enemy_min_area,
     )
     enemy_classes = enemy_classification(
-        frame_bgr,
+        work_frame,
         proposals=proposals,
         catalogs=catalogs,
         mode=enemy_classifier_mode,
         profile=profile,
     )
-    projectiles = projectile_detection(frame_bgr, templates=templates)
-    projectile_classes, hazards = projectile_classification(
-        frame_bgr,
-        proposals=projectiles,
-        catalogs=catalogs,
-        profile=profile,
-        mode=enemy_classifier_mode,
-    )
-    interactables, world_objects = world_object_detection(
-        frame_bgr,
-        templates=templates,
-        catalogs=catalogs or CuratedCatalogs(),
-        interact_threshold=interact_threshold,
-        profile=profile,
-    )
+    grid = _rescale_grid_cells(grid, scale_x, scale_y)
+    proposals = _rescale_labeled_boxes(proposals, scale_x, scale_y)
+    enemy_classes = _rescale_tracked_entities(enemy_classes, scale_x, scale_y)
+
+    if projectiles_enabled:
+        projectile_templates = templates if scale_x == 1.0 and scale_y == 1.0 else None
+        projectiles = projectile_detection(work_frame, templates=projectile_templates)
+        projectile_classes, hazards = projectile_classification(
+            work_frame,
+            proposals=projectiles,
+            catalogs=catalogs,
+            profile=profile,
+            mode=enemy_classifier_mode,
+        )
+        projectiles = _rescale_labeled_boxes(projectiles, scale_x, scale_y)
+        projectile_classes = _rescale_tracked_entities(projectile_classes, scale_x, scale_y)
+        hazards = _rescale_world_objects(hazards, scale_x, scale_y)
+    else:
+        projectiles = []
+        projectile_classes = []
+        hazards = []
+
+    if world_objects_enabled:
+        interactables, world_objects = world_object_detection(
+            frame_bgr,
+            templates=templates,
+            catalogs=catalogs or CuratedCatalogs(),
+            interact_threshold=interact_threshold,
+            profile=profile,
+            allowed_families=tuple(world_object_families or ()),
+        )
+    else:
+        interactables = []
+        world_objects = []
     objective_ui = objective_ui or UiTextDetection()
     map_state_cv = minimap_state_detection(
         frame_bgr,
@@ -985,6 +1216,15 @@ def analyze_scene(
         probe_result=probe_result,
         profile=profile,
     )
+    local_map = build_seen_local_map(
+        grid=grid,
+        enemies=enemy_classes,
+        frame_shape=frame_bgr.shape,
+        rows=grid_rows,
+        cols=grid_cols,
+    )
+    detection_sources["local_map"] = local_map.source
+    source_confidence["local_map"] = local_map.confidence
     return {
         "grid": grid,
         "enemies": proposals,
@@ -996,6 +1236,7 @@ def analyze_scene(
         "hazards": hazards,
         "player_pose": player_pose,
         "map_state": map_state,
+        "local_map": local_map,
         "objective_ui": objective_ui,
         "detector_profile": profile,
         "detection_sources": detection_sources,
@@ -1013,39 +1254,47 @@ def draw_recognition_overlay(
     hud_values: dict | None = None,
     hud_regions: dict | None = None,
     region_overlays: list[RegionOverlay] | None = None,
+    show_grid: bool = True,
+    show_grid_labels: bool = True,
+    show_local_map: bool = True,
+    show_extra_detections: bool = False,
     show_legend: bool = True,
 ) -> np.ndarray:
     canvas = frame_bgr.copy()
-    overlay = frame_bgr.copy()
-    grid = analysis.get("grid", [])
-    for cell in grid:
-        x, y, w, h = cell.rect
-        if cell.label == "surface":
-            color = (60, 200, 60)
-        elif cell.label == "obstacle":
-            color = (40, 40, 220)
-        else:
-            color = (120, 120, 120)
-        cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
-        cv2.rectangle(canvas, (x, y), (x + w, y + h), (20, 20, 20), 1)
-        if w >= 40 and h >= 30:
-            _draw_label(canvas, (x, y), cell.label, color)
-    cv2.addWeighted(overlay, grid_alpha, canvas, 1 - grid_alpha, 0, canvas)
+    if show_grid:
+        overlay = frame_bgr.copy()
+        grid = analysis.get("grid", [])
+        for cell in grid:
+            x, y, w, h = cell.rect
+            if cell.label == "surface":
+                color = (60, 200, 60)
+            elif cell.label in {"wall", "obstacle"}:
+                color = (40, 40, 220)
+            else:
+                color = (120, 120, 120)
+            cv2.rectangle(overlay, (x, y), (x + w, y + h), color, 2)
+            cv2.rectangle(canvas, (x, y), (x + w, y + h), (20, 20, 20), 1)
+            if show_grid_labels and w >= 40 and h >= 30:
+                _draw_label(canvas, (x, y), cell.label, color)
+        cv2.addWeighted(overlay, grid_alpha, canvas, 1 - grid_alpha, 0, canvas)
 
     enemy_boxes = analysis.get("enemy_classes") or analysis.get("enemies", [])
     for box in enemy_boxes:
         _draw_labeled_box(canvas, box.rect, _format_box_label(box), (0, 0, 255))
-    projectile_boxes = analysis.get("projectile_classes") or analysis.get("projectiles", [])
-    for box in projectile_boxes:
-        _draw_labeled_box(canvas, box.rect, _format_box_label(box), (180, 0, 255))
-    world_boxes = list(analysis.get("world_objects") or analysis.get("interactables", []))
-    world_boxes.extend(analysis.get("hazards", []))
-    for box in world_boxes:
-        color = (40, 180, 255) if getattr(box, "hazard_kind", None) else (255, 140, 0)
-        _draw_labeled_box(canvas, box.rect, _format_box_label(box), color)
+    if show_extra_detections:
+        projectile_boxes = analysis.get("projectile_classes") or analysis.get("projectiles", [])
+        for box in projectile_boxes:
+            _draw_labeled_box(canvas, box.rect, _format_box_label(box), (180, 0, 255))
+        world_boxes = list(analysis.get("world_objects") or analysis.get("interactables", []))
+        world_boxes.extend(analysis.get("hazards", []))
+        for box in world_boxes:
+            color = (40, 180, 255) if getattr(box, "hazard_kind", None) else (255, 140, 0)
+            _draw_labeled_box(canvas, box.rect, _format_box_label(box), color)
     if region_overlays:
         for region in region_overlays:
             _draw_labeled_box(canvas, region.rect, region.label, region.color)
+    if show_local_map:
+        _draw_local_map_overlay(canvas, analysis.get("local_map"))
     if hud_values is not None:
         hud_overlay = canvas.copy()
         labels = _draw_hud_overlay(hud_overlay, frame_bgr, hud_values, hud_regions)
@@ -1124,6 +1373,42 @@ def _format_box_label(item) -> str:
     return text
 
 
+def _draw_local_map_overlay(frame_bgr: np.ndarray, local_map) -> None:
+    if not isinstance(local_map, LocalMap) or local_map.rows <= 0 or local_map.cols <= 0:
+        return
+    frame_h, frame_w = frame_bgr.shape[:2]
+    max_w = max(64, int(frame_w * 0.18))
+    max_h = max(48, int(frame_h * 0.22))
+    cell_size = max(4, min(12, max_w // max(1, local_map.cols), max_h // max(1, local_map.rows)))
+    map_w = local_map.cols * cell_size
+    map_h = local_map.rows * cell_size
+    x0 = max(8, frame_w - map_w - 12)
+    y0 = max(8, frame_h - map_h - 12)
+    cv2.rectangle(frame_bgr, (x0 - 4, y0 - 18), (x0 + map_w + 4, y0 + map_h + 4), (0, 0, 0), -1)
+    cv2.rectangle(frame_bgr, (x0 - 4, y0 - 18), (x0 + map_w + 4, y0 + map_h + 4), (220, 220, 220), 1)
+    cv2.putText(
+        frame_bgr,
+        "seen map",
+        (x0, y0 - 5),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+    for cell in local_map.cells:
+        cx = x0 + int(cell.col) * cell_size
+        cy = y0 + int(cell.row) * cell_size
+        color = (50, 170, 70) if cell.label == "surface" else (45, 70, 210)
+        cv2.rectangle(frame_bgr, (cx, cy), (cx + cell_size, cy + cell_size), color, -1)
+        cv2.rectangle(frame_bgr, (cx, cy), (cx + cell_size, cy + cell_size), (25, 25, 25), 1)
+    radius = max(2, cell_size // 3)
+    for enemy in local_map.enemies:
+        ex = x0 + int(enemy.col) * cell_size + cell_size // 2
+        ey = y0 + int(enemy.row) * cell_size + cell_size // 2
+        cv2.circle(frame_bgr, (ex, ey), radius, (0, 0, 255), -1)
+
+
 def _draw_labeled_box(
     frame_bgr: np.ndarray,
     rect: tuple[int, int, int, int],
@@ -1155,11 +1440,8 @@ def _draw_labeled_box(
 def _draw_default_legend(frame_bgr: np.ndarray) -> None:
     items = [
         ("surface", (60, 200, 60)),
-        ("obstacle", (40, 40, 220)),
+        ("wall", (40, 40, 220)),
         ("enemy", (0, 0, 255)),
-        ("projectile", (180, 0, 255)),
-        ("world", (255, 140, 0)),
-        ("hazard", (40, 180, 255)),
         ("hud_roi", (0, 255, 255)),
     ]
     x0 = 10
@@ -1206,9 +1488,10 @@ def _draw_label(
     baseline: int | None = None,
     font_path: str | None = None,
 ):
+    text_color = _label_text_color(color)
     if _has_non_ascii(text):
         font_size = max(10, int(20 * scale))
-        _draw_label_pil(frame_bgr, origin, text, color, font_path, font_size)
+        _draw_label_pil(frame_bgr, origin, text, color, text_color, font_path, font_size)
         return
     if text_size is None or baseline is None:
         (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
@@ -1228,10 +1511,16 @@ def _draw_label(
         (tx + 3, ty + th + 1),
         font,
         scale,
-        (255, 255, 255),
+        text_color,
         thickness,
         cv2.LINE_AA,
     )
+
+
+def _label_text_color(bg_color: tuple[int, int, int]) -> tuple[int, int, int]:
+    blue, green, red = bg_color
+    luminance = (0.114 * blue) + (0.587 * green) + (0.299 * red)
+    return (0, 0, 0) if luminance >= 160.0 else (255, 255, 255)
 
 
 def _draw_label_pil(
@@ -1239,6 +1528,7 @@ def _draw_label_pil(
     origin: tuple[int, int],
     text: str,
     color: tuple[int, int, int],
+    text_color: tuple[int, int, int],
     font_path: str | None,
     font_size: int,
 ) -> None:
@@ -1257,7 +1547,7 @@ def _draw_label_pil(
     bg_color = (color[2], color[1], color[0])
     draw.rectangle(rect, fill=bg_color)
     text_pos = (tx + pad_x - bbox[0], ty + pad_y - bbox[1])
-    draw.text(text_pos, text, font=font, fill=(255, 255, 255))
+    draw.text(text_pos, text, font=font, fill=(text_color[2], text_color[1], text_color[0]))
     frame_bgr[:] = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
 

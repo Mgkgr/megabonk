@@ -558,7 +558,7 @@ class StatefulNavigationPlanner:
             weight = 0.8 + (rel_y * 1.4)
             label = str(getattr(cell, "label", "unknown")).lower()
             surface_score = 1.0 if label == "surface" else 0.20 if label == "unknown" else 0.0
-            obstacle_score = 1.0 if label == "obstacle" else 0.45 if label == "unknown" else 0.0
+            obstacle_score = 1.0 if label in {"obstacle", "wall"} else 0.45 if label == "unknown" else 0.0
             support_sum += surface_score * weight
             support_weight += weight
             obstacle_focus = 1.15 - (rel_y * 0.45)
