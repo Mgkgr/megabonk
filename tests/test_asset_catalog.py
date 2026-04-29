@@ -163,3 +163,47 @@ def test_load_curated_catalogs_attaches_dbg_hud_enemy_samples(tmp_path):
     assert catalogs.enemies[0].extra_preview_sizes == ((18, 18),)
     assert catalogs.enemies[0].extra_preview_paths[0].name == "3orc.png"
     assert len(catalogs.enemies[0].preview_samples) == 2
+
+
+def test_dbg_hud_orc_samples_do_not_attach_to_color_aliases(tmp_path):
+    (tmp_path / "dbg_hud").mkdir(parents=True)
+    sample = np.zeros((18, 18, 3), dtype=np.uint8)
+    sample[:, :] = (0, 220, 0)
+    cv2.imwrite(str(tmp_path / "dbg_hud" / "orc.png"), sample)
+
+    enemy_manifest_path = tmp_path / "enemy_catalog.json"
+    enemy_manifest_path.write_text(
+        json.dumps(
+            [
+                {
+                    "entity_id": "orc",
+                    "kind": "enemy",
+                    "display_name": "Orc",
+                    "aliases": ["orc", "fbx_orc_Color"],
+                    "preview_relpath": "missing/orc.png",
+                    "metadata": {"family": "orc"},
+                },
+                {
+                    "entity_id": "shadyguy",
+                    "kind": "enemy",
+                    "display_name": "ShadyGuy",
+                    "aliases": ["shady", "shadyguy", "fbx_ShadyGuy_ColorCommon"],
+                    "preview_relpath": "missing/shady.png",
+                    "metadata": {"family": "shadyguy"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    world_manifest_path = tmp_path / "world_catalog.json"
+    world_manifest_path.write_text("[]", encoding="utf-8")
+
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=tmp_path / "missing_refs",
+        enemy_catalog_path=enemy_manifest_path,
+        world_catalog_path=world_manifest_path,
+    )
+    by_id = {entry.entity_id: entry for entry in catalogs.enemies}
+
+    assert [path.name for path in by_id["orc"].extra_preview_paths] == ["orc.png"]
+    assert by_id["shadyguy"].extra_preview_paths == ()

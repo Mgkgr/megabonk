@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from megabonk_bot.config import load_config
 from run_runtime_bot import _resolve_optional_path, _resolve_project_base_dir
@@ -90,6 +91,12 @@ def test_load_config_yaml_navigation_override(tmp_path):
     assert config["navigation"]["profile"] == "balanced"
     assert config["navigation"]["lane_count"] == 7
     assert config["navigation"]["memory_required_for_slide"] is False
+
+
+def test_runtime_bot_profile_keeps_enemy_classification_enabled():
+    config = load_config(Path("config/bot_profile.yaml"))
+
+    assert config["detection"]["enemy_classifier_mode"] == "hybrid"
 
 
 def test_load_config_rejects_invalid_types(tmp_path):

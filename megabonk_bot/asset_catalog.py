@@ -297,7 +297,7 @@ def _discover_extra_preview_paths(debug_samples_dir: Path | None, entry: Catalog
         stem = _compact_match_token(path.stem)
         if not stem:
             continue
-        if any(token in stem or stem in token for token in tokens):
+        if any(token == stem or token in stem for token in tokens):
             matches.append(path)
     return tuple(matches)
 
