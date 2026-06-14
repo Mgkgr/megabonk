@@ -14,6 +14,7 @@ class CatalogEntry:
     display_name: str
     aliases: tuple[str, ...] = ()
     preview_relpath: str | None = None
+    preview_relpaths: tuple[str, ...] = ()
     template_names: tuple[str, ...] = ()
     threat_tier: float = 1.0
     poi_type: str | None = None
@@ -41,15 +42,25 @@ class OcrLexicon:
         return tuple(ordered)
 
 
+@dataclass(frozen=True)
+class PreviewDescriptor:
+    gray32: Any
+    hist32: Any
+    edges32: Any
+    mask32: Any
+
+
 @dataclass
 class LoadedCatalogEntry:
     entry: CatalogEntry
     preview_bgr: Any | None = None
     preview_size: tuple[int, int] | None = None
     preview_path: Path | None = None
+    preview_descriptor: PreviewDescriptor | None = None
     extra_preview_bgrs: tuple[Any, ...] = ()
     extra_preview_sizes: tuple[tuple[int, int], ...] = ()
     extra_preview_paths: tuple[Path, ...] = ()
+    extra_preview_descriptors: tuple[PreviewDescriptor, ...] = ()
     minimap_icon_bgr: Any | None = None
     minimap_icon_size: tuple[int, int] | None = None
     minimap_icon_path: Path | None = None
@@ -146,6 +157,14 @@ class LoadedCatalogEntry:
         samples.extend(item for item in self.extra_preview_bgrs if item is not None)
         return tuple(samples)
 
+    @property
+    def preview_descriptors(self) -> tuple[PreviewDescriptor, ...]:
+        descriptors = []
+        if self.preview_descriptor is not None:
+            descriptors.append(self.preview_descriptor)
+        descriptors.extend(item for item in self.extra_preview_descriptors if item is not None)
+        return tuple(descriptors)
+
 
 @dataclass(frozen=True)
 class CuratedCatalogs:
@@ -175,16 +194,21 @@ class CuratedCatalogs:
 
 def _coerce_entry(raw: dict[str, Any]) -> CatalogEntry:
     aliases = tuple(str(item) for item in raw.get("aliases", []) if item)
+    preview_relpaths = tuple(str(item) for item in raw.get("preview_relpaths", []) if item)
     template_names = tuple(str(item) for item in raw.get("template_names", []) if item)
     metadata = raw.get("metadata", {})
     if not isinstance(metadata, dict):
         metadata = {}
+    preview_relpath = str(raw["preview_relpath"]) if raw.get("preview_relpath") else None
+    if not preview_relpath and preview_relpaths:
+        preview_relpath = preview_relpaths[0]
     return CatalogEntry(
         entity_id=str(raw["entity_id"]),
         kind=str(raw.get("kind", "unknown")),
         display_name=str(raw.get("display_name", raw["entity_id"])),
         aliases=aliases,
-        preview_relpath=str(raw["preview_relpath"]) if raw.get("preview_relpath") else None,
+        preview_relpath=preview_relpath,
+        preview_relpaths=preview_relpaths,
         template_names=template_names,
         threat_tier=float(raw.get("threat_tier", 1.0)),
         poi_type=str(raw["poi_type"]) if raw.get("poi_type") else None,
@@ -192,10 +216,21 @@ def _coerce_entry(raw: dict[str, Any]) -> CatalogEntry:
     )
 
 
+def _read_structured_file(path: Path) -> Any:
+    raw = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        try:
+            import yaml  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("Для YAML-каталога нужен пакет pyyaml (`pip install pyyaml`).") from exc
+        return yaml.safe_load(raw)
+    return json.loads(raw)
+
+
 def _read_manifest(path: Path | None) -> tuple[CatalogEntry, ...]:
     if path is None or not path.exists():
         return ()
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _read_structured_file(path)
     if not isinstance(raw, list):
         raise ValueError(f"Catalog manifest must be a list: {path}")
     entries = []
@@ -209,7 +244,7 @@ def _read_manifest(path: Path | None) -> tuple[CatalogEntry, ...]:
 def _read_ocr_lexicon(path: Path | None) -> OcrLexicon:
     if path is None or not path.exists():
         return OcrLexicon()
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _read_structured_file(path)
     if not isinstance(raw, dict):
         return OcrLexicon()
     tokens = tuple(str(item) for item in raw.get("tokens", []) if item)
@@ -240,6 +275,22 @@ def _load_image(path: Path | None):
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
     h, w = image.shape[:2]
     return image, (w, h), path
+
+
+def _build_preview_descriptor(image):
+    if image is None:
+        return None
+    try:
+        import cv2
+    except Exception:
+        return None
+    resized = cv2.resize(image, (32, 32), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    hist = cv2.calcHist([resized], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+    cv2.normalize(hist, hist)
+    edges = cv2.Canny(gray, 60, 180)
+    _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return PreviewDescriptor(gray32=gray, hist32=hist, edges32=edges, mask32=mask)
 
 
 def _resolve_asset_path(asset_refs_dir: Path | None, relpath: str | None) -> Path | None:
@@ -293,7 +344,7 @@ def _discover_extra_preview_paths(debug_samples_dir: Path | None, entry: Catalog
     if not tokens:
         return ()
     matches: list[Path] = []
-    for path in sorted(debug_samples_dir.glob("*.png")):
+    for path in sorted(debug_samples_dir.rglob("*.png")):
         stem = _compact_match_token(path.stem)
         if not stem:
             continue
@@ -337,11 +388,19 @@ def _load_entries(
     for entry in entries:
         preview_path = _resolve_asset_path(asset_refs_dir, entry.preview_relpath)
         preview_bgr, preview_size, preview_path = _load_image(preview_path)
-        extra_preview_paths = _discover_extra_preview_paths(debug_samples_dir, entry)
+        preview_descriptor = _build_preview_descriptor(preview_bgr)
+        manifest_extra_paths = tuple(
+            _resolve_asset_path(asset_refs_dir, relpath)
+            for relpath in entry.preview_relpaths
+            if relpath and relpath != entry.preview_relpath
+        )
+        extra_preview_paths = tuple(path for path in manifest_extra_paths if path is not None)
+        extra_preview_paths = extra_preview_paths + _discover_extra_preview_paths(debug_samples_dir, entry)
         extra_preview_bgrs, extra_preview_sizes, extra_preview_paths = _load_extra_previews(
             extra_preview_paths,
             preview_path,
         )
+        extra_preview_descriptors = tuple(_build_preview_descriptor(item) for item in extra_preview_bgrs if item is not None)
 
         minimap_icon_relpath = entry.metadata.get("minimap_icon_relpath")
         minimap_icon_path = _resolve_asset_path(asset_refs_dir, str(minimap_icon_relpath) if minimap_icon_relpath else None)
@@ -357,9 +416,11 @@ def _load_entries(
                 preview_bgr=preview_bgr,
                 preview_size=preview_size,
                 preview_path=preview_path,
+                preview_descriptor=preview_descriptor,
                 extra_preview_bgrs=extra_preview_bgrs,
                 extra_preview_sizes=extra_preview_sizes,
                 extra_preview_paths=extra_preview_paths,
+                extra_preview_descriptors=extra_preview_descriptors,
                 minimap_icon_bgr=minimap_icon_bgr,
                 minimap_icon_size=minimap_icon_size,
                 minimap_icon_path=minimap_icon_path,

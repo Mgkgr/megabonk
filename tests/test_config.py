@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 
 from megabonk_bot.config import load_config
-from run_runtime_bot import _resolve_optional_path, _resolve_project_base_dir
+from run_runtime_bot import _resolve_optional_path, _resolve_project_base_dir, parse_args
 
 
 def test_load_config_defaults():
@@ -27,6 +27,7 @@ def test_load_config_defaults():
         "overlay": 18.0,
     }
     assert config["mvp_policy"]["map_scan_interval_ticks"] == 180
+    assert config["mvp_policy"]["survival_only"] is False
     assert config["detection"]["asset_refs_dir"] == "art_refs/megabonk_unity_extracts"
     assert config["detection"]["analysis_scale"] == 1.0
     assert config["detection"]["projectiles_enabled"] is False
@@ -97,6 +98,51 @@ def test_runtime_bot_profile_keeps_enemy_classification_enabled():
     config = load_config(Path("config/bot_profile.yaml"))
 
     assert config["detection"]["enemy_classifier_mode"] == "hybrid"
+    assert config["detection"]["enemy_catalog_path"] == "config/enemy_catalog.yaml"
+    assert config["detection"]["world_catalog_path"] == "config/world_catalog.yaml"
+
+
+def test_runtime_bot_profile_disables_non_survival_side_goals():
+    config = load_config(Path("config/bot_profile.yaml"))
+
+    assert config["detection"]["memory_probe_enabled"] is False
+    assert config["mvp_policy"]["chest_policy"] == "never_open"
+    assert config["mvp_policy"]["auto_pick_upgrade_with_space"] is False
+    assert config["mvp_policy"]["allow_map_scan_tab"] is False
+    assert config["max_policy"]["enabled"] is False
+    assert config["max_policy"]["explore_with_tab"] is False
+    assert config["max_policy"]["bunny_hop_enabled"] is False
+    assert config["max_policy"]["sliding_enabled"] is False
+    assert config["max_policy"]["collect_shrines_and_statues"] is False
+    assert config["navigation"]["memory_required_for_slide"] is False
+
+
+def test_survival_mvp_profile_disables_non_survival_features():
+    config = load_config(Path("config/survival_mvp.yaml"))
+
+    assert config["mvp_policy"]["survival_only"] is True
+    assert config["detection"]["enemy_catalog_path"] == "config/enemy_catalog.yaml"
+    assert config["detection"]["world_catalog_path"] == "config/world_catalog.yaml"
+    assert config["detection"]["projectiles_enabled"] is False
+    assert config["detection"]["world_objects_enabled"] is False
+    assert config["detection"]["minimap_enabled"] is False
+    assert config["detection"]["memory_probe_enabled"] is False
+    assert config["mvp_policy"]["chest_policy"] == "never_open"
+    assert config["mvp_policy"]["auto_pick_upgrade_with_space"] is False
+    assert config["mvp_policy"]["allow_map_scan_tab"] is False
+    assert config["max_policy"]["enabled"] is False
+    assert config["max_policy"]["explore_with_tab"] is False
+    assert config["max_policy"]["bunny_hop_enabled"] is False
+    assert config["max_policy"]["sliding_enabled"] is False
+    assert config["max_policy"]["collect_shrines_and_statues"] is False
+    assert config["navigation"]["profile"] == "cautious"
+    assert config["navigation"]["memory_required_for_slide"] is False
+
+
+def test_runtime_cli_defaults_to_survival_mvp_profile():
+    args = parse_args([])
+
+    assert args.config == "config/survival_mvp.yaml"
 
 
 def test_load_config_rejects_invalid_types(tmp_path):

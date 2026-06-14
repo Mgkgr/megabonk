@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from megabonk_bot.asset_catalog import CuratedCatalogs, LoadedCatalogEntry
+from megabonk_bot.asset_catalog import CuratedCatalogs, LoadedCatalogEntry, PreviewDescriptor
 from megabonk_bot.hud import DEFAULT_HUD_REGIONS
 from megabonk_bot.memory_probe import ProbeResult
 from megabonk_bot.ui_ocr import UiTextDetection
@@ -53,6 +53,14 @@ class DetectorProfile:
     allow_chests: bool = True
     boss_emphasis: float = 1.0
     hazard_emphasis: float = 1.0
+
+
+@dataclass(frozen=True)
+class PatchDescriptor:
+    gray32: np.ndarray
+    hist32: np.ndarray
+    edges32: np.ndarray
+    mask32: np.ndarray
 
 
 def _normalize_tag(value: str | None) -> str:
@@ -434,30 +442,34 @@ def _extract_patch(frame_bgr: np.ndarray, rect: tuple[int, int, int, int]) -> np
     return patch
 
 
-def _patch_similarity(patch_bgr: np.ndarray, preview_bgr: np.ndarray) -> float:
-    if patch_bgr is None or preview_bgr is None or patch_bgr.size == 0 or preview_bgr.size == 0:
-        return 0.0
+def _build_patch_descriptor(patch_bgr: np.ndarray | None) -> PatchDescriptor | None:
+    if patch_bgr is None or patch_bgr.size == 0:
+        return None
     target_size = (32, 32)
     patch = cv2.resize(patch_bgr, target_size, interpolation=cv2.INTER_AREA)
-    preview = cv2.resize(preview_bgr, target_size, interpolation=cv2.INTER_AREA)
-
     patch_gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
-    preview_gray = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
-    corr = float(cv2.matchTemplate(patch_gray, preview_gray, cv2.TM_CCOEFF_NORMED)[0][0])
-    corr = max(0.0, min(1.0, (corr + 1.0) / 2.0))
-
     patch_hist = cv2.calcHist([patch], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-    prev_hist = cv2.calcHist([preview], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
     cv2.normalize(patch_hist, patch_hist)
-    cv2.normalize(prev_hist, prev_hist)
-    hist_score = float(cv2.compareHist(patch_hist, prev_hist, cv2.HISTCMP_CORREL))
-    hist_score = max(0.0, min(1.0, (hist_score + 1.0) / 2.0))
-
     patch_edges = cv2.Canny(patch_gray, 60, 180)
-    preview_edges = cv2.Canny(preview_gray, 60, 180)
-    edge_score = float(cv2.matchTemplate(patch_edges, preview_edges, cv2.TM_CCOEFF_NORMED)[0][0])
+    _, patch_mask = cv2.threshold(patch_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return PatchDescriptor(gray32=patch_gray, hist32=patch_hist, edges32=patch_edges, mask32=patch_mask)
+
+
+def _patch_similarity_from_descriptor(
+    patch: PatchDescriptor | None,
+    preview: PreviewDescriptor | None,
+) -> float:
+    if patch is None or preview is None:
+        return 0.0
+    corr = float(cv2.matchTemplate(patch.gray32, preview.gray32, cv2.TM_CCOEFF_NORMED)[0][0])
+    corr = max(0.0, min(1.0, (corr + 1.0) / 2.0))
+    hist_score = float(cv2.compareHist(patch.hist32, preview.hist32, cv2.HISTCMP_CORREL))
+    hist_score = max(0.0, min(1.0, (hist_score + 1.0) / 2.0))
+    edge_score = float(cv2.matchTemplate(patch.edges32, preview.edges32, cv2.TM_CCOEFF_NORMED)[0][0])
     edge_score = max(0.0, min(1.0, (edge_score + 1.0) / 2.0))
-    return (corr * 0.45) + (hist_score * 0.4) + (edge_score * 0.15)
+    mask_score = float(cv2.matchTemplate(patch.mask32, preview.mask32, cv2.TM_CCOEFF_NORMED)[0][0])
+    mask_score = max(0.0, min(1.0, (mask_score + 1.0) / 2.0))
+    return (corr * 0.30) + (hist_score * 0.30) + (edge_score * 0.20) + (mask_score * 0.20)
 
 
 def _silhouette_similarity(patch_bgr: np.ndarray | None, silhouette_bgr: np.ndarray | None) -> float:
@@ -479,7 +491,11 @@ def _entry_alias_tokens(entry: LoadedCatalogEntry) -> tuple[str, ...]:
 
 
 def _catalog_match_score(entry: LoadedCatalogEntry, *, patch: np.ndarray | None, profile: DetectorProfile) -> float:
-    texture_score = max((_patch_similarity(patch, preview) for preview in entry.preview_samples), default=0.0)
+    patch_descriptor = _build_patch_descriptor(patch)
+    texture_score = max(
+        (_patch_similarity_from_descriptor(patch_descriptor, preview) for preview in entry.preview_descriptors),
+        default=0.0,
+    )
     silhouette_score = _silhouette_similarity(patch, entry.silhouette_bgr)
     score = texture_score
     if silhouette_score > 0.0:

@@ -240,6 +240,261 @@ def _classify_fast_digit(component) -> str | None:
     return None
 
 
+_HUD_DIGIT_TEMPLATE_SIZE = (16, 20)
+_HUD_DIGIT_TEMPLATE_PATTERNS = {
+    "0": (
+        "....######...",
+        "....######...",
+        "..##..######.",
+        "..##..######.",
+        "####....#####",
+        "####....#####",
+        "####......###",
+        "####....#####",
+        "####....#####",
+        "####..#######",
+        "####..##..###",
+        "######....###",
+        "######....###",
+        "####.....####",
+        "######...####",
+        "######...####",
+        "..######..##.",
+        "..######..##.",
+        "....######...",
+        "....######...",
+    ),
+    "1": (
+        "....##..",
+        "....##..",
+        "..####..",
+        "..####..",
+        "######..",
+        "######..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "..####..",
+        "########",
+    ),
+    "3": (
+        "....#########..",
+        "....##########.",
+        "..#############",
+        "..##......#####",
+        "####........###",
+        "####........###",
+        "######.....####",
+        "######.....####",
+        "..######...###.",
+        "..######...###.",
+        "....########...",
+        "....########...",
+        "..##....######.",
+        "####....#######",
+        "####......#####",
+        "######......###",
+        "######......###",
+        "..######...###.",
+        "..######...###.",
+        "....########...",
+    ),
+    "4": (
+        ".........####...",
+        ".........####...",
+        ".......######...",
+        ".......######...",
+        "......##.####...",
+        "......##.####...",
+        "....##...####...",
+        "....##...####...",
+        "..##.....####...",
+        "..##.....####...",
+        "####.....####...",
+        "####.....####...",
+        "################",
+        "################",
+        "###############.",
+        ".........####...",
+        ".........####...",
+        ".........####...",
+        ".........####...",
+        ".........####...",
+    ),
+    "5": (
+        ".############",
+        "#############",
+        "#############",
+        "####.........",
+        "####.........",
+        "####.........",
+        "####..####...",
+        "####..####...",
+        "############.",
+        "############.",
+        "####....#####",
+        "####....#####",
+        "###.......###",
+        "###.......###",
+        "..........###",
+        "####......###",
+        "####......###",
+        "######....##.",
+        "######....##.",
+        "..########...",
+    ),
+    "8": (
+        "....#########..",
+        "....#########..",
+        "..#############",
+        "..##.....######",
+        "####.....#.####",
+        "####.......####",
+        "######.....####",
+        "######.....####",
+        "..######...##..",
+        "..######...##..",
+        "....#######....",
+        "....#######....",
+        "..##...######..",
+        "####...########",
+        "####.....######",
+        "######.....####",
+        "######.....####",
+        "..######...##..",
+        "..######...##..",
+        "....#######....",
+    ),
+    "9": (
+        "....########...",
+        "....########...",
+        "..############.",
+        "..##....######.",
+        "####......#####",
+        "####......#####",
+        "####........###",
+        "####........###",
+        "######.....####",
+        "######.....####",
+        "..######...####",
+        "..######...####",
+        "....###########",
+        "....###########",
+        "............###",
+        "####.......###.",
+        "####.......###.",
+        "######....##...",
+        "######....##...",
+        "..########.....",
+    ),
+}
+_HUD_DIGIT_TEMPLATES = None
+
+
+def _pattern_to_mask(pattern):
+    h = len(pattern)
+    w = max(len(row) for row in pattern)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    for y, row in enumerate(pattern):
+        for x, char in enumerate(row):
+            if char == "#":
+                mask[y, x] = 255
+    return mask
+
+
+def _normalize_digit_mask(mask, *, out_w=16, out_h=20):
+    if mask is None or mask.size == 0:
+        return None
+    binary = (mask > 0).astype(np.uint8) * 255
+    ys, xs = np.where(binary > 0)
+    if xs.size == 0 or ys.size == 0:
+        return None
+    binary = binary[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+    h, w = binary.shape[:2]
+    if h <= 0 or w <= 0:
+        return None
+    scaled_w = max(1, min(out_w, int(round(float(w) * float(out_h) / float(h)))))
+    resized = cv2.resize(
+        binary,
+        (scaled_w, out_h),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    canvas = np.zeros((out_h, out_w), dtype=np.uint8)
+    x0 = max(0, (out_w - scaled_w) // 2)
+    canvas[:, x0 : x0 + scaled_w] = (resized > 0).astype(np.uint8)
+    return canvas
+
+
+def _get_hud_digit_templates():
+    global _HUD_DIGIT_TEMPLATES
+    if _HUD_DIGIT_TEMPLATES is not None:
+        return _HUD_DIGIT_TEMPLATES
+    templates = {}
+    for digit, pattern in _HUD_DIGIT_TEMPLATE_PATTERNS.items():
+        normalized = _normalize_digit_mask(_pattern_to_mask(pattern))
+        if normalized is not None:
+            templates.setdefault(digit, []).append(normalized)
+    if templates.get("5"):
+        templates.setdefault("2", []).append(np.fliplr(templates["5"][0]))
+    if templates.get("9"):
+        templates.setdefault("6", []).append(np.fliplr(templates["9"][0]))
+    seven = np.zeros(
+        (_HUD_DIGIT_TEMPLATE_SIZE[1], _HUD_DIGIT_TEMPLATE_SIZE[0]),
+        dtype=np.uint8,
+    )
+    seven[0:4, 3:14] = 1
+    seven[3:20, 10:15] = 1
+    templates.setdefault("7", []).append(seven)
+    _HUD_DIGIT_TEMPLATES = templates
+    return templates
+
+
+def _digit_template_distance(candidate, template):
+    best = 1.0
+    for shift in (-2, -1, 0, 1, 2):
+        if shift < 0:
+            cand = candidate[:, :shift]
+            tpl = template[:, -shift:]
+        elif shift > 0:
+            cand = candidate[:, shift:]
+            tpl = template[:, :-shift]
+        else:
+            cand = candidate
+            tpl = template
+        union = int(np.logical_or(cand, tpl).sum())
+        if union <= 0:
+            continue
+        intersection = int(np.logical_and(cand, tpl).sum())
+        best = min(best, 1.0 - (intersection / float(union)))
+    return best
+
+
+def _classify_digit_template(component_mask) -> str | None:
+    candidate = _normalize_digit_mask(component_mask)
+    if candidate is None:
+        return None
+    best_digit = None
+    best_score = 1.0
+    for digit, templates in _get_hud_digit_templates().items():
+        score = min(
+            _digit_template_distance(candidate, template)
+            for template in templates
+        )
+        if score < best_score:
+            best_score = score
+            best_digit = digit
+    return best_digit if best_score <= 0.34 else None
+
+
 def _fast_hud_digit_text(roi_bgr, *, allow_colon=False) -> str | None:
     if roi_bgr is None or roi_bgr.size == 0:
         return None
@@ -250,7 +505,12 @@ def _fast_hud_digit_text(roi_bgr, *, allow_colon=False) -> str | None:
         x, y, w, h, area = [int(value) for value in stats[idx]]
         if area < 10:
             continue
-        if allow_colon and x < int(mask.shape[1] * 0.35) and h >= 20 and (w / max(1, h)) >= 0.80:
+        if (
+            allow_colon
+            and x < int(mask.shape[1] * 0.35)
+            and h >= 20
+            and (w / max(1, h)) >= 0.80
+        ):
             continue
         components.append((x, y, w, h, area))
     if not components:
@@ -265,9 +525,13 @@ def _fast_hud_digit_text(roi_bgr, *, allow_colon=False) -> str | None:
                 tokens.append((x, ":"))
                 colon_x = x
             continue
-        if h < 14 or area < 40:
+        if h < 18 or area < 40:
             continue
-        digit = _classify_fast_digit(component)
+        if w <= 4 and h >= 14:
+            continue
+        digit = _classify_digit_template(mask[_y : _y + h, x : x + w])
+        if digit is None:
+            digit = _classify_fast_digit(component)
         if digit is None:
             return None
         tokens.append((x, digit))
@@ -382,6 +646,14 @@ def read_hud_time(frame_bgr, regions=None, *, min_conf=45.0):
         return {
             "time": None,
             "fail_reason": "ocr_empty",
+            "ocr_ms": ocr_ms,
+            "rect": rect,
+            "tesseract_cmd": tesseract_cmd,
+        }
+    if conf < min_conf * 0.5:
+        return {
+            "time": None,
+            "fail_reason": f"low_conf:{conf:.1f}",
             "ocr_ms": ocr_ms,
             "rect": rect,
             "tesseract_cmd": tesseract_cmd,

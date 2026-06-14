@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import Any, Optional
 
 
+RUNTIME_DEBUG_TEXT_X = 12
+RUNTIME_DEBUG_TEXT_START_Y = 164
+RUNTIME_DEBUG_LINE_HEIGHT = 24
+RUNTIME_DEBUG_PANEL_X = 8
+RUNTIME_DEBUG_PANEL_TOP = 148
+RUNTIME_DEBUG_PANEL_RIGHT = 1240
+
+
 def point_in_rect(x: int, y: int, rect: Optional[tuple[int, int, int, int]]) -> bool:
     if rect is None:
         return False
@@ -150,16 +158,12 @@ def draw_runtime_overlay(
     player_world = getattr(player_pose, "world_pos", None) if player_pose is not None else None
     enemy_classes = getattr(snapshot, "enemy_classes", [])
     local_map = getattr(snapshot, "local_map", None)
-    scene_id = getattr(map_state, "scene_id", None) if map_state is not None else None
-    objective = getattr(map_state, "objective", None) if map_state is not None else None
-    is_crypt = getattr(map_state, "is_crypt", None) if map_state is not None else None
     map_pos = "?"
     if player_norm is not None:
         map_pos = f"{player_norm[0]:.2f},{player_norm[1]:.2f}"
     world_pos = "?"
     if player_world is not None:
         world_pos = f"{player_world[0]:.1f},{player_world[1]:.1f},{player_world[2]:.1f}"
-    detection_sources = getattr(snapshot, "detection_sources", {}) or {}
     local_map_summary = "?"
     if local_map is not None:
         local_map_summary = (
@@ -169,47 +173,36 @@ def draw_runtime_overlay(
         )
     time_fail = hud_values.get("time_fail_reason") or "ok"
     kills_fail = hud_values.get("kills_fail_reason") or "ok"
-    nav_terrain = getattr(navigation_context, "terrain_kind", "unknown")
-    nav_escape = getattr(navigation_context, "escape_lane", None) or "none"
-    nav_conf = format_float(getattr(navigation_context, "nav_confidence", None), digits=2)
-    nav_drop = format_float(getattr(navigation_context, "drop_risk", None), digits=2)
-    nav_jump_gate = getattr(navigation_context, "jump_gate", "not_evaluated")
-    nav_slide_gate = getattr(navigation_context, "slide_gate", "not_evaluated")
-    nav_slope_source = getattr(navigation_context, "slope_source", "none")
-    nav_slope_delta = format_float(getattr(navigation_context, "slope_delta_z", None), digits=3)
     lines = [
         f"mode={mode.value}",
         f"reason={action_reason}",
         f"hp={hp_pct} lvl={snapshot.lvl} kills={snapshot.kills} time={snapshot.time_s}",
         f"gold={hud_values.get('gold')}  time_ocr={format_float(hud_values.get('time_ocr_ms'))}ms ({time_fail})",
         f"kills_ocr={format_float(hud_values.get('kills_ocr_ms'))}ms ({kills_fail})",
-        f"nav terrain={nav_terrain} escape={nav_escape} conf={nav_conf} drop={nav_drop}",
-        f"nav jump={nav_jump_gate} slide={nav_slide_gate} slope={nav_slope_source}:{nav_slope_delta}",
-        f"surfaces/walls/enemies: enemies={len(snapshot.enemies)} enemy_classes={len(enemy_classes)} walls={len(snapshot.obstacles)} local_map={local_map_summary}",
+        f"enemies={len(snapshot.enemies)} enemy_classes={len(enemy_classes)} walls={len(snapshot.obstacles)} local_map={local_map_summary}",
         f"dead={snapshot.is_dead} upgrade={snapshot.is_upgrade} safe_sector={snapshot.safe_sector}",
-        f"scene={scene_id} crypt={is_crypt} objective={objective}",
         f"map_open={map_open} minimap={minimap_visible} map_pos={map_pos} world_pos={world_pos}",
-        f"probe={getattr(snapshot, 'memory_probe_status', 'disabled')} sources={detection_sources}",
-        "legend: green=surface blue=wall red=enemy yellow=hud_roi",
-        "controls: click START/STOP or PANIC | Q/Esc=quit",
     ]
-    y = 24
+    y = RUNTIME_DEBUG_TEXT_START_Y
     for line in lines:
         cv2.putText(
             canvas,
             line,
-            (12, y),
+            (RUNTIME_DEBUG_TEXT_X, y),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
             (255, 255, 255),
             2,
             cv2.LINE_AA,
         )
-        y += 24
+        y += RUNTIME_DEBUG_LINE_HEIGHT
     cv2.rectangle(
         canvas,
-        (8, 8),
-        (1240, min(h - 8, 8 + 24 * (len(lines) + 1))),
+        (RUNTIME_DEBUG_PANEL_X, RUNTIME_DEBUG_PANEL_TOP),
+        (
+            RUNTIME_DEBUG_PANEL_RIGHT,
+            min(h - 8, RUNTIME_DEBUG_PANEL_TOP + RUNTIME_DEBUG_LINE_HEIGHT * (len(lines) + 1)),
+        ),
         (20, 20, 20) if transparent_canvas else (0, 0, 0),
         2,
     )

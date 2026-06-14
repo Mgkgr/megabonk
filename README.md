@@ -7,7 +7,7 @@
 ## Что внутри
 
 - `run_runtime_bot.py` - основной runtime-бот.
-- `config/bot_profile.yaml` - рабочий профиль runtime.
+- `config/survival_mvp.yaml` - рекомендуемый survival-only профиль runtime.
 - `megabonk_bot/` - пакет с распознаванием, конфигом, runtime-логикой, overlay, navigation, memory probe и event logger.
 - `templates/` - PNG-шаблоны UI/HUD.
 - `art_refs/megabonk_unity_extracts/` - референсы и иконки для каталогов.
@@ -72,7 +72,7 @@ python make_templates.py --export-hud --source screen.png --hud-outdir dbg_hud/s
 5. Запустите runtime:
 
 ```powershell
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
+python run_runtime_bot.py --window Megabonk --config config/survival_mvp.yaml
 ```
 
 Управление:
@@ -85,16 +85,16 @@ python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml
 Полезные варианты запуска:
 
 ```powershell
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --capture-backend printwindow
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --capture-backend mss
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --no-overlay
-python run_runtime_bot.py --window Megabonk --config config/bot_profile.yaml --templates-dir templates
+python run_runtime_bot.py --window Megabonk --config config/survival_mvp.yaml --capture-backend printwindow
+python run_runtime_bot.py --window Megabonk --config config/survival_mvp.yaml --capture-backend mss
+python run_runtime_bot.py --window Megabonk --config config/survival_mvp.yaml --no-overlay
+python run_runtime_bot.py --window Megabonk --config config/survival_mvp.yaml --templates-dir templates
 python run_runtime_bot.py --print-default-config
 ```
 
 ## Конфиг
 
-Основной файл: `config/bot_profile.yaml`.
+Рекомендуемый файл для runtime: `config/survival_mvp.yaml`.
 
 Чаще всего правятся:
 

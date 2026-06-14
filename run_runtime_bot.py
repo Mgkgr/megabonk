@@ -34,33 +34,128 @@ from megabonk_bot.runtime.overlay import (
     draw_runtime_overlay as _runtime_draw_runtime_overlay,
     handle_overlay_mouse_event as _runtime_handle_overlay_mouse_event,
 )
+from megabonk_bot.runtime.overlay_window import (
+    ensure_overlay_window as _runtime_ensure_overlay_window,
+    resize_overlay_window as _runtime_resize_overlay_window,
+    set_overlay_borderless as _runtime_set_overlay_borderless,
+    set_overlay_colorkey_transparent as _runtime_set_overlay_colorkey_transparent,
+    set_overlay_topmost as _runtime_set_overlay_topmost,
+    sync_overlay_to_game_window as _runtime_sync_overlay_to_game_window,
+)
 from megabonk_bot.runtime.perf_budget import (
     build_performance_sample,
     format_over_budget,
     normalize_performance_budget_ms,
 )
+from megabonk_bot.runtime.recovery_clicks import (
+    make_window_click as _runtime_make_window_click,
+    try_click_template as _runtime_try_click_template,
+)
 from megabonk_bot.runtime.recovery import RecoveryState, decide_recovery_action
+from megabonk_bot.runtime.screen_state import RuntimeScreenDetector, is_death_like_frame
+from megabonk_bot.runtime.upgrade_dialog import is_upgrade_dialog as _runtime_is_upgrade_dialog
+from megabonk_bot.ui_ocr import UiTextDetection
 
 cv2 = None
 di = None
-HWND_TOPMOST = -1
-HWND_NOTOPMOST = -2
-SWP_NOMOVE = 0x0002
-SWP_NOSIZE = 0x0001
-SWP_NOACTIVATE = 0x0010
-SWP_FRAMECHANGED = 0x0020
-SWP_SHOWWINDOW = 0x0040
-GWL_EXSTYLE = -20
-GWL_STYLE = -16
-WS_EX_LAYERED = 0x00080000
-LWA_COLORKEY = 0x00000001
-WS_CAPTION = 0x00C00000
-WS_THICKFRAME = 0x00040000
-WS_MINIMIZE = 0x20000000
-WS_MAXIMIZE = 0x01000000
-WS_SYSMENU = 0x00080000
 
 LOGGER = logging.getLogger(__name__)
+
+
+class NullObjectiveUiCache:
+    def start(self) -> None:
+        return None
+
+    def submit(self, _frame) -> None:
+        return None
+
+    def snapshot(self) -> UiTextDetection:
+        return UiTextDetection()
+
+    def close(self) -> None:
+        return None
+
+
+class NullHudTelemetryCache:
+    def start(self) -> None:
+        return None
+
+    def submit(self, _frame) -> None:
+        return None
+
+    def set_regions(self, _regions) -> None:
+        return None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "debug_dumped": False,
+            "hud_fail_streak": 0,
+            "hud_ts": None,
+        }
+
+    def close(self) -> None:
+        return None
+
+
+def _resolve_allow_map_scan(
+    *,
+    survival_only: bool,
+    allow_map_scan_tab: bool,
+    max_enabled: bool,
+    explore_with_tab: bool,
+    current_scene_id: str,
+) -> bool:
+    if survival_only:
+        return False
+    if str(current_scene_id).lower() == "finalbossmap":
+        return False
+    return bool(allow_map_scan_tab or (max_enabled and explore_with_tab))
+
+
+def _should_auto_pick_upgrade(*, survival_only: bool, auto_pick_upgrade_with_space: bool) -> bool:
+    if survival_only:
+        return False
+    return bool(auto_pick_upgrade_with_space)
+
+
+def _resolve_runtime_detection_flags(
+    *,
+    survival_only: bool,
+    minimap_enabled: bool,
+    projectiles_enabled: bool,
+    world_objects_enabled: bool,
+    memory_probe_enabled: bool,
+) -> dict[str, bool]:
+    if survival_only:
+        return {
+            "minimap_enabled": False,
+            "projectiles_enabled": False,
+            "world_objects_enabled": False,
+            "memory_probe_enabled": False,
+        }
+    return {
+        "minimap_enabled": bool(minimap_enabled),
+        "projectiles_enabled": bool(projectiles_enabled),
+        "world_objects_enabled": bool(world_objects_enabled),
+        "memory_probe_enabled": bool(memory_probe_enabled),
+    }
+
+
+def _resolve_runtime_movement_flags(
+    *,
+    survival_only: bool,
+    bunny_hop_enabled: bool,
+    sliding_enabled: bool,
+) -> dict[str, bool]:
+    if survival_only:
+        return {
+            "bunny_hop_enabled": False,
+            "sliding_enabled": False,
+        }
+    return {
+        "bunny_hop_enabled": bool(bunny_hop_enabled),
+        "sliding_enabled": bool(sliding_enabled),
+    }
 
 
 def key_on(key: str) -> None:
@@ -89,201 +184,6 @@ def release_all_keys() -> None:
 
 def apply_cam_yaw(yaw_id: int, cam_yaw_pixels: int) -> None:
     _runtime_apply_cam_yaw(di, yaw_id, cam_yaw_pixels)
-
-
-def _is_upgrade_dialog(frame_bgr, templates, regions, threshold=0.62):
-    from megabonk_bot.vision import find_in_region
-
-    if frame_bgr is None or not templates or not regions:
-        return False
-    region = regions.get("REG_CHEST")
-    if not region:
-        return False
-    for name in (
-        "tpl_katana",
-        "tpl_dexec",
-        "tpl_foliant_bottom1",
-        "tpl_foliant_bottom2",
-        "tpl_foliant_bottom3",
-        "tpl_blood_tome",
-    ):
-        tpl = templates.get(name)
-        if tpl is None:
-            continue
-        found, _, _ = find_in_region(frame_bgr, tpl, region, threshold=threshold)
-        if found:
-            return True
-    return False
-
-
-def _make_window_click(cap, *, focus_interval_s: float):
-    def _click(client_x: int, client_y: int, delay: float = 0.0) -> None:
-        cap.focus_if_needed(topmost=False, min_interval_s=focus_interval_s)
-        bbox = cap.get_bbox()
-        x, y = cap.client_to_screen(int(client_x), int(client_y), bbox=bbox)
-        di.moveTo(x, y)
-        di.click()
-        if delay > 0:
-            time.sleep(delay)
-
-    return _click
-
-
-def _try_click_template(
-    frame,
-    templates,
-    regions,
-    tpl_name,
-    region_name,
-    threshold,
-    click_fn=None,
-) -> bool:
-    from megabonk_bot.vision import find_in_region
-
-    if tpl_name not in templates or region_name not in regions:
-        return False
-    found, (cx, cy), score = find_in_region(
-        frame,
-        templates[tpl_name],
-        regions[region_name],
-        threshold=threshold,
-    )
-    if not found:
-        return False
-    if click_fn is not None:
-        click_fn(cx, cy, 0.0)
-    else:
-        di.moveTo(cx, cy)
-        di.click()
-    return score >= threshold
-
-
-def _set_overlay_topmost(window_name: str) -> bool:
-    if not hasattr(ctypes, "windll"):
-        return False
-    user32 = getattr(ctypes.windll, "user32", None)
-    if user32 is None:
-        return False
-    hwnd = user32.FindWindowW(None, window_name)
-    if not hwnd:
-        return False
-    return bool(
-        user32.SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )
-    )
-
-
-def _move_overlay_window(
-    window_name: str,
-    *,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    topmost: bool,
-) -> bool:
-    if not hasattr(ctypes, "windll"):
-        return False
-    user32 = getattr(ctypes.windll, "user32", None)
-    if user32 is None:
-        return False
-    hwnd = user32.FindWindowW(None, window_name)
-    if not hwnd:
-        return False
-    insert_after = HWND_TOPMOST if topmost else HWND_NOTOPMOST
-    return bool(
-        user32.SetWindowPos(
-            hwnd,
-            insert_after,
-            int(x),
-            int(y),
-            int(w),
-            int(h),
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )
-    )
-
-
-def _set_overlay_borderless(window_name: str) -> bool:
-    if not hasattr(ctypes, "windll"):
-        return False
-    user32 = getattr(ctypes.windll, "user32", None)
-    if user32 is None:
-        return False
-    hwnd = user32.FindWindowW(None, window_name)
-    if not hwnd:
-        return False
-    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU)
-    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-    return bool(
-        user32.SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE
-            | SWP_NOSIZE
-            | SWP_NOACTIVATE
-            | SWP_FRAMECHANGED
-            | SWP_SHOWWINDOW,
-        )
-    )
-
-
-def _set_overlay_colorkey_transparent(window_name: str, colorkey=(0, 0, 0)) -> bool:
-    if not hasattr(ctypes, "windll"):
-        return False
-    user32 = getattr(ctypes.windll, "user32", None)
-    if user32 is None:
-        return False
-    hwnd = user32.FindWindowW(None, window_name)
-    if not hwnd:
-        return False
-    exstyle = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    exstyle |= WS_EX_LAYERED
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle)
-    r, g, b = colorkey
-    colorref = int(r) | (int(g) << 8) | (int(b) << 16)
-    return bool(user32.SetLayeredWindowAttributes(hwnd, colorref, 0, LWA_COLORKEY))
-
-
-def _sync_overlay_to_game_window(
-    window_name: str,
-    bbox: dict[str, Any],
-    *,
-    topmost: bool,
-) -> bool:
-    return _move_overlay_window(
-        window_name,
-        x=int(bbox.get("left", 0)),
-        y=int(bbox.get("top", 0)),
-        w=max(1, int(bbox.get("width", 1))),
-        h=max(1, int(bbox.get("height", 1))),
-        topmost=topmost,
-    )
-
-
-def _ensure_overlay_window(window_name: str, *, width: int, height: int) -> None:
-    if cv2 is None:
-        return
-    cv2.namedWindow(window_name, getattr(cv2, "WINDOW_NORMAL", 0))
-    _resize_overlay_window(window_name, width=width, height=height)
-
-
-def _resize_overlay_window(window_name: str, *, width: int, height: int) -> None:
-    if cv2 is None:
-        return
-    cv2.resizeWindow(window_name, max(1, int(width)), max(1, int(height)))
 
 
 class WinHotkeyPoller:
@@ -533,12 +433,13 @@ def _load_optional_json(path: Path | None) -> dict[str, Any]:
 
 def _build_world_probe(
     *,
+    survival_only: bool,
     enabled: bool,
     window_title: str,
     poll_interval_s: float,
     signatures_path: Path | None,
 ) -> WorldStateProbe:
-    if not enabled:
+    if survival_only or not enabled:
         return NullProbe()
     signatures = _load_optional_json(signatures_path)
     if not signatures:
@@ -550,6 +451,51 @@ def _build_world_probe(
     )
 
 
+def _build_objective_cache(
+    *,
+    survival_only: bool,
+    read_objective_ui,
+    lexicon,
+    interval_s: float,
+):
+    if survival_only:
+        return NullObjectiveUiCache()
+    return ObjectiveUiCache(
+        read_objective_ui=read_objective_ui,
+        lexicon=lexicon,
+        interval_s=interval_s,
+    )
+
+
+def _build_hud_cache(
+    *,
+    survival_only: bool,
+    read_hud_telemetry,
+    regions,
+    interval_s: float,
+):
+    if survival_only:
+        return NullHudTelemetryCache()
+    return HudTelemetryCache(
+        read_hud_telemetry=read_hud_telemetry,
+        regions=regions,
+        interval_s=interval_s,
+    )
+
+
+def _build_screen_detector(
+    *,
+    templates,
+    regions,
+    autopilot_cfg: dict[str, Any],
+):
+    return RuntimeScreenDetector(
+        templates=templates,
+        regions=regions,
+        template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
+    )
+
+
 def run(args) -> None:
     global cv2
     global di
@@ -557,7 +503,6 @@ def run(args) -> None:
     import cv2 as _cv2
     import pydirectinput as _di
 
-    from autopilot import AutoPilot, is_death_like_frame
     from megabonk_bot.hud import read_hud_telemetry
     from megabonk_bot.max_model import (
         BossWindow,
@@ -593,6 +538,19 @@ def run(args) -> None:
     navigation_cfg = config["navigation"]
     hotkey_cfg = config["hotkeys"]
     autopilot_cfg = config["autopilot"]
+    survival_only = bool(mvp_cfg.get("survival_only", False))
+    runtime_detection_flags = _resolve_runtime_detection_flags(
+        survival_only=survival_only,
+        minimap_enabled=bool(detect_cfg.get("minimap_enabled", False)),
+        projectiles_enabled=bool(detect_cfg.get("projectiles_enabled", False)),
+        world_objects_enabled=bool(detect_cfg.get("world_objects_enabled", False)),
+        memory_probe_enabled=bool(detect_cfg.get("memory_probe_enabled", True)),
+    )
+    runtime_movement_flags = _resolve_runtime_movement_flags(
+        survival_only=survival_only,
+        bunny_hop_enabled=bool(max_cfg.get("bunny_hop_enabled", True)),
+        sliding_enabled=bool(max_cfg.get("sliding_enabled", True)),
+    )
 
     step_hz = max(1, int(runtime_cfg["step_hz"]))
     dt = 1.0 / step_hz
@@ -637,10 +595,15 @@ def run(args) -> None:
 
     cap = WindowCapture.create(window_title, capture_backend=capture_backend)
     cap.focus(topmost=True)
-    window_click = _make_window_click(cap, focus_interval_s=window_focus_interval_s)
+    window_click = _runtime_make_window_click(
+        cap,
+        input_driver=di,
+        focus_interval_s=window_focus_interval_s,
+    )
     bbox = cap.get_bbox()
     if overlay_enabled:
-        _ensure_overlay_window(
+        _runtime_ensure_overlay_window(
+            cv2,
             overlay_window,
             width=int(bbox.get("width", 1)),
             height=int(bbox.get("height", 1)),
@@ -679,23 +642,22 @@ def run(args) -> None:
         ocr_lexicon_path=ocr_lexicon_path,
     )
     world_probe = _build_world_probe(
-        enabled=bool(detect_cfg.get("memory_probe_enabled", True)),
+        survival_only=survival_only,
+        enabled=runtime_detection_flags["memory_probe_enabled"],
         window_title=window_title,
         poll_interval_s=float(detect_cfg.get("memory_poll_interval_s", 0.25)),
         signatures_path=memory_signatures_path,
     )
-    autopilot = AutoPilot(
+    screen_detector = _build_screen_detector(
         templates=templates,
         regions=regions,
-        click_cooldown_s=float(autopilot_cfg.get("click_cooldown_s", 0.5)),
-        template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
-        click_fn=window_click,
+        autopilot_cfg=autopilot_cfg,
     )
     heuristic_cfg = _prepare_heuristic_config(detect_cfg, autopilot_cfg)
     navigation_planner = StatefulNavigationPlanner(
         config=_prepare_navigation_config(navigation_cfg),
-        allow_bunny_hop=bool(max_cfg.get("bunny_hop_enabled", True)),
-        sliding_enabled=bool(max_cfg.get("sliding_enabled", True)),
+        allow_bunny_hop=runtime_movement_flags["bunny_hop_enabled"],
+        sliding_enabled=runtime_movement_flags["sliding_enabled"],
         jump_cooldown=int(heuristic_cfg.get("jump_cooldown", 30)),
         slide_cooldown=int(heuristic_cfg.get("slide_cooldown", 24)),
         stuck_diff_threshold=float(heuristic_cfg.get("stuck_diff_threshold", 3.0)),
@@ -708,13 +670,15 @@ def run(args) -> None:
         panic_vk=int(hotkey_cfg["panic_vk"]),
     )
     logger = JsonlEventLogger(Path(runtime_cfg["event_log_path"]))
-    hud_cache = HudTelemetryCache(
+    hud_cache = _build_hud_cache(
+        survival_only=survival_only,
         read_hud_telemetry=read_hud_telemetry,
         regions=regions,
         interval_s=hud_ocr_every_s,
     )
     hud_cache.start()
-    objective_cache = ObjectiveUiCache(
+    objective_cache = _build_objective_cache(
+        survival_only=survival_only,
         read_objective_ui=read_objective_ui,
         lexicon=catalogs.ocr_lexicon if catalogs else None,
         interval_s=objective_ocr_every_s,
@@ -726,7 +690,9 @@ def run(args) -> None:
     if max_enabled and bool(detect_cfg.get("use_onnx")) and detect_cfg.get("onnx_model_path"):
         onnx_detector = OnnxObjectDetector(str(detect_cfg["onnx_model_path"]))
     scene_memory = SceneMemory360(ttl_s=float(detect_cfg.get("scene_memory_ttl_s", 2.0)))
-    boss_schedule = _parse_boss_schedule(config.get("boss_schedule", []), BossWindow)
+    boss_schedule = []
+    if not survival_only:
+        boss_schedule = _parse_boss_schedule(config.get("boss_schedule", []), BossWindow)
 
     try:
         mode = BotMode(str(runtime_cfg.get("state", "OFF")).upper())
@@ -808,7 +774,8 @@ def run(args) -> None:
                 bbox["width"] = w
                 bbox["height"] = h
                 if overlay_enabled:
-                    _resize_overlay_window(
+                    _runtime_resize_overlay_window(
+                        cv2,
                         overlay_window,
                         width=int(w),
                         height=int(h),
@@ -816,17 +783,15 @@ def run(args) -> None:
                     last_overlay_frame = None
                 regions = build_regions(w, h)
                 hud_cache.set_regions(regions)
-                autopilot = AutoPilot(
+                screen_detector = _build_screen_detector(
                     templates=templates,
                     regions=regions,
-                    click_cooldown_s=float(autopilot_cfg.get("click_cooldown_s", 0.5)),
-                    template_thresholds=dict(autopilot_cfg.get("template_thresholds", {})),
-                    click_fn=window_click,
+                    autopilot_cfg=autopilot_cfg,
                 )
 
-            screen = autopilot.detect_screen(frame)
+            screen = screen_detector.detect(frame)
             is_dead = screen == "DEAD" or (screen != "RUNNING" and is_death_like_frame(frame))
-            is_upgrade = _is_upgrade_dialog(frame, templates, regions)
+            is_upgrade = _runtime_is_upgrade_dialog(frame, templates, regions)
             stage_start = time.perf_counter()
             hud_cache.submit(frame)
             objective_cache.submit(frame)
@@ -852,9 +817,9 @@ def run(args) -> None:
                 enemy_min_area=float(detect_cfg["enemy_min_area"]),
                 interact_threshold=float(detect_cfg["interact_threshold"]),
                 enemy_classifier_mode=str(detect_cfg.get("enemy_classifier_mode", "hybrid")),
-                minimap_enabled=bool(detect_cfg.get("minimap_enabled", False)),
-                projectiles_enabled=bool(detect_cfg.get("projectiles_enabled", False)),
-                world_objects_enabled=bool(detect_cfg.get("world_objects_enabled", False)),
+                minimap_enabled=runtime_detection_flags["minimap_enabled"],
+                projectiles_enabled=runtime_detection_flags["projectiles_enabled"],
+                world_objects_enabled=runtime_detection_flags["world_objects_enabled"],
                 world_object_families=tuple(detect_cfg.get("world_object_families", [])),
                 analysis_scale=float(detect_cfg.get("analysis_scale", 1.0)),
             )
@@ -864,7 +829,7 @@ def run(args) -> None:
 
             analysis.setdefault("projectiles", [])
             onnx_detections: list[ObjectDetection] = []
-            projectiles_enabled = bool(detect_cfg.get("projectiles_enabled", False))
+            projectiles_enabled = runtime_detection_flags["projectiles_enabled"]
             if onnx_detector is not None and onnx_detector.enabled:
                 onnx_detections = onnx_detector.detect(frame)
                 analysis.setdefault("enemy_classes", [])
@@ -934,12 +899,13 @@ def run(args) -> None:
                 recovery_state.started_ts = time.time()
                 recovery_state.attempts = 0
 
-            allow_tab_scan = bool(mvp_cfg.get("allow_map_scan_tab", False)) or bool(
-                max_enabled and max_cfg.get("explore_with_tab", False)
+            allow_tab_scan = _resolve_allow_map_scan(
+                survival_only=survival_only,
+                allow_map_scan_tab=bool(mvp_cfg.get("allow_map_scan_tab", False)),
+                max_enabled=max_enabled,
+                explore_with_tab=bool(max_cfg.get("explore_with_tab", False)),
+                current_scene_id=str(getattr(map_state, "scene_id", "") or ""),
             )
-            current_scene_id = str(getattr(map_state, "scene_id", "") or "").lower()
-            if current_scene_id == "finalbossmap":
-                allow_tab_scan = False
             map_scan_now = False
             if allow_tab_scan:
                 map_scan_tick += 1
@@ -965,7 +931,10 @@ def run(args) -> None:
             )
             preferred_direction = pick_low_cost_direction(occupancy)
             elapsed = int(time.time() - run_started_ts)
-            boss_prep, boss_name = should_enter_boss_prep(elapsed, boss_schedule)
+            boss_prep = False
+            boss_name = None
+            if not survival_only:
+                boss_prep, boss_name = should_enter_boss_prep(elapsed, boss_schedule)
             action, navigation_context = navigation_planner.evaluate(
                 frame,
                 snapshot,
@@ -1004,7 +973,7 @@ def run(args) -> None:
                         hold("r", dt=restart_hold_s)
                     if decision.try_fallback_click:
                         clicked = (
-                            _try_click_template(
+                            _runtime_try_click_template(
                                 frame,
                                 templates,
                                 regions,
@@ -1013,7 +982,7 @@ def run(args) -> None:
                                 0.6,
                                 click_fn=window_click,
                             )
-                            or _try_click_template(
+                            or _runtime_try_click_template(
                                 frame,
                                 templates,
                                 regions,
@@ -1036,7 +1005,12 @@ def run(args) -> None:
                     tap("shift", dt=0.005)
                 if action.press_tab:
                     tap("tab", dt=0.01)
-                if bool(mvp_cfg.get("auto_pick_upgrade_with_space", True)) and action.press_space:
+                if _should_auto_pick_upgrade(
+                    survival_only=survival_only,
+                    auto_pick_upgrade_with_space=bool(
+                        mvp_cfg.get("auto_pick_upgrade_with_space", True)
+                    ),
+                ) and action.press_space:
                     now = time.time()
                     if (now - last_upgrade_space_ts) >= upgrade_space_cooldown_s:
                         tap("space", dt=0.01)
@@ -1088,26 +1062,31 @@ def run(args) -> None:
                                 )
                                 overlay_bbox_error_logged = True
                             game_bbox = bbox
-                        _resize_overlay_window(
+                        _runtime_resize_overlay_window(
+                            cv2,
                             overlay_window,
                             width=int(game_bbox.get("width", w)),
                             height=int(game_bbox.get("height", h)),
                         )
-                        _sync_overlay_to_game_window(
+                        _runtime_sync_overlay_to_game_window(
                             overlay_window,
                             game_bbox,
                             topmost=overlay_topmost_enabled,
                         )
                         if not overlay_borderless_applied:
-                            overlay_borderless_applied = _set_overlay_borderless(overlay_window)
+                            overlay_borderless_applied = _runtime_set_overlay_borderless(
+                                overlay_window
+                            )
                         if not overlay_transparent_applied:
-                            overlay_transparent_applied = _set_overlay_colorkey_transparent(
-                                overlay_window,
-                                colorkey=(0, 0, 0),
+                            overlay_transparent_applied = (
+                                _runtime_set_overlay_colorkey_transparent(
+                                    overlay_window,
+                                    colorkey=(0, 0, 0),
+                                )
                             )
                         overlay_topmost_applied = overlay_topmost_enabled
                     elif not overlay_topmost_applied and overlay_topmost_enabled:
-                        overlay_topmost_applied = _set_overlay_topmost(overlay_window)
+                        overlay_topmost_applied = _runtime_set_overlay_topmost(overlay_window)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), 27):
                     should_quit = True
@@ -1191,7 +1170,7 @@ def run(args) -> None:
             cv2.destroyAllWindows()
 
 
-def parse_args():
+def parse_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
         description="Runtime bot (MVP): F8 toggle, F12 panic, JSONL + overlay.",
     )
@@ -1208,7 +1187,7 @@ def parse_args():
         default=None,
         help="How often to enforce focus on the target window",
     )
-    parser.add_argument("--config", default="config/bot_profile.yaml", help="Path to YAML/JSON config")
+    parser.add_argument("--config", default="config/survival_mvp.yaml", help="Path to YAML/JSON config")
     parser.add_argument("--templates-dir", default=None, help="Templates directory")
     parser.add_argument("--no-overlay", action="store_true", help="Disable overlay window")
     parser.add_argument("--no-hotkeys", action="store_true", help="Disable WinAPI hotkeys")
@@ -1217,7 +1196,7 @@ def parse_args():
         action="store_true",
         help="Print default config in YAML and exit",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":

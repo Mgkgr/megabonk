@@ -1,0 +1,14 @@
+- entity_id: orc
+  kind: enemy
+  display_name: orc
+  aliases: []
+  preview_relpath: imported/enemies/orc/01_orc.png
+  preview_relpaths:
+  - imported/enemies/orc/01_orc.png
+  - imported/enemies/orc/02_5orc.png
+  - imported/enemies/orc/03_4orc.png
+  - imported/enemies/orc/04_3orc.png
+  - imported/enemies/orc/05_2orc.png
+  metadata:
+    family: orc
+    variant: default

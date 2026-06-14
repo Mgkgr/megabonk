@@ -1,0 +1,27 @@
+runtime:
+  state: "OFF"
+
+detection:
+  enemy_catalog_path: config/enemy_catalog.yaml
+  world_catalog_path: config/world_catalog.yaml
+  projectiles_enabled: false
+  world_objects_enabled: false
+  minimap_enabled: false
+  memory_probe_enabled: false
+
+mvp_policy:
+  chest_policy: never_open
+  auto_pick_upgrade_with_space: false
+  survival_only: true
+  allow_map_scan_tab: false
+
+max_policy:
+  enabled: false
+  explore_with_tab: false
+  bunny_hop_enabled: false
+  sliding_enabled: false
+  collect_shrines_and_statues: false
+
+navigation:
+  profile: cautious
+  memory_required_for_slide: false

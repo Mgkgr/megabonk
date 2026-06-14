@@ -1,0 +1,24 @@
+- entity_id: chest
+  kind: poi
+  display_name: Chest
+  aliases: []
+  preview_relpath: imported/props/chest/01_1chest.png
+  preview_relpaths:
+  - imported/props/chest/01_1chest.png
+  metadata:
+    family: chest
+    variant: default
+  poi_type: loot
+- entity_id: tree
+  kind: poi
+  display_name: tree
+  aliases: []
+  preview_relpath: imported/decor/tree/01_1tree.png
+  preview_relpaths:
+  - imported/decor/tree/01_1tree.png
+  - imported/decor/tree/02_2tree.png
+  - imported/decor/tree/03_3tree.png
+  metadata:
+    family: decor
+    variant: default
+  poi_type: decor

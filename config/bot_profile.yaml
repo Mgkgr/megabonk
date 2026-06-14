@@ -56,34 +56,34 @@ detection:
   onnx_model_path: ''
   scene_memory_ttl_s: 2.0
   asset_refs_dir: art_refs/megabonk_unity_extracts
-  enemy_catalog_path: config/enemy_catalog.json
-  world_catalog_path: config/world_catalog.json
+  enemy_catalog_path: config/enemy_catalog.yaml
+  world_catalog_path: config/world_catalog.yaml
   projectile_catalog_path: config/projectile_catalog.json
   ocr_lexicon_path: config/ocr_lexicon.json
   memory_signatures_path: config/memory_signatures.json
   minimap_enabled: false
-  memory_probe_enabled: true
+  memory_probe_enabled: false
   memory_poll_interval_s: 0.25
   enemy_classifier_mode: "hybrid"
 mvp_policy:
   chest_policy: never_open
-  auto_pick_upgrade_with_space: true
+  auto_pick_upgrade_with_space: false
   user_picks_character_manually: true
   allow_map_scan_tab: false
   map_scan_interval_ticks: 180
 max_policy:
   enabled: false
-  explore_with_tab: true
+  explore_with_tab: false
   threat_scoring: true
-  bunny_hop_enabled: true
-  sliding_enabled: true
-  collect_shrines_and_statues: true
+  bunny_hop_enabled: false
+  sliding_enabled: false
+  collect_shrines_and_statues: false
 navigation:
   profile: cautious
   lane_count: 5
   drop_risk_threshold: 0.58
   downhill_z_threshold: 0.18
-  memory_required_for_slide: true
+  memory_required_for_slide: false
 autopilot:
   click_cooldown_s: 0.5
   template_thresholds: {}

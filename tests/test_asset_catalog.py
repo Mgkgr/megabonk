@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -165,6 +166,51 @@ def test_load_curated_catalogs_attaches_dbg_hud_enemy_samples(tmp_path):
     assert len(catalogs.enemies[0].preview_samples) == 2
 
 
+def test_load_curated_catalogs_attaches_dbg_hud_enemy_samples_from_subdir(tmp_path):
+    asset_refs = tmp_path / "refs"
+    enemies_dir = asset_refs / "enemies"
+    enemies_dir.mkdir(parents=True)
+    (tmp_path / "dbg_hud" / "orc").mkdir(parents=True)
+
+    preview = np.zeros((16, 16, 3), dtype=np.uint8)
+    preview[:, :] = (255, 0, 255)
+    extra = np.zeros((18, 18, 3), dtype=np.uint8)
+    extra[:, :] = (0, 220, 0)
+
+    cv2.imwrite(str(enemies_dir / "orc_main.png"), preview)
+    cv2.imwrite(str(tmp_path / "dbg_hud" / "orc" / "4orc.png"), extra)
+
+    enemy_manifest_path = tmp_path / "enemy_catalog.json"
+    enemy_manifest_path.write_text(
+        json.dumps(
+            [
+                {
+                    "entity_id": "orc",
+                    "kind": "enemy",
+                    "display_name": "Orc",
+                    "aliases": ["orc", "fbx_orc_Color"],
+                    "preview_relpath": "enemies/orc_main.png",
+                    "threat_tier": 3.0,
+                    "metadata": {"family": "orc", "variant": "default"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    world_manifest_path = tmp_path / "world_catalog.json"
+    world_manifest_path.write_text("[]", encoding="utf-8")
+
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=asset_refs,
+        enemy_catalog_path=enemy_manifest_path,
+        world_catalog_path=world_manifest_path,
+    )
+
+    assert len(catalogs.enemies) == 1
+    assert [path.name for path in catalogs.enemies[0].extra_preview_paths] == ["4orc.png"]
+    assert len(getattr(catalogs.enemies[0], "preview_descriptors", ())) == 2
+
+
 def test_dbg_hud_orc_samples_do_not_attach_to_color_aliases(tmp_path):
     (tmp_path / "dbg_hud").mkdir(parents=True)
     sample = np.zeros((18, 18, 3), dtype=np.uint8)
@@ -207,3 +253,62 @@ def test_dbg_hud_orc_samples_do_not_attach_to_color_aliases(tmp_path):
 
     assert [path.name for path in by_id["orc"].extra_preview_paths] == ["orc.png"]
     assert by_id["shadyguy"].extra_preview_paths == ()
+
+
+def test_load_curated_catalogs_reads_yaml_manifest(tmp_path):
+    pytest.importorskip("yaml")
+    asset_refs = tmp_path / "refs"
+    enemies_dir = asset_refs / "imported" / "enemies" / "orc"
+    enemies_dir.mkdir(parents=True)
+
+    preview = np.zeros((16, 16, 3), dtype=np.uint8)
+    preview[:, :] = (0, 220, 0)
+    cv2.imwrite(str(enemies_dir / "sample.png"), preview)
+
+    enemy_manifest_path = tmp_path / "enemy_catalog.yaml"
+    enemy_manifest_path.write_text(
+        "\n".join(
+            [
+                "- entity_id: orc",
+                "  kind: enemy",
+                "  display_name: Orc",
+                "  aliases: [orc, brute]",
+                "  preview_relpath: imported/enemies/orc/sample.png",
+                "  threat_tier: 3.0",
+                "  metadata:",
+                "    family: orc",
+                "    variant: default",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    world_manifest_path = tmp_path / "world_catalog.yaml"
+    world_manifest_path.write_text("[]\n", encoding="utf-8")
+
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=asset_refs,
+        enemy_catalog_path=enemy_manifest_path,
+        world_catalog_path=world_manifest_path,
+    )
+
+    assert len(catalogs.enemies) == 1
+    assert catalogs.enemies[0].entity_id == "orc"
+    assert catalogs.enemies[0].aliases == ("orc", "brute")
+    assert catalogs.enemies[0].preview_size == (16, 16)
+
+
+def test_repo_survival_catalog_manifests_have_preview_samples_for_all_entries():
+    pytest.importorskip("yaml")
+    repo_root = Path(__file__).resolve().parents[1]
+
+    catalogs = load_curated_catalogs(
+        asset_refs_dir=repo_root / "art_refs" / "megabonk_unity_extracts",
+        enemy_catalog_path=repo_root / "config" / "enemy_catalog.yaml",
+        world_catalog_path=repo_root / "config" / "world_catalog.yaml",
+        projectile_catalog_path=repo_root / "config" / "projectile_catalog.json",
+    )
+
+    assert catalogs.enemies
+    assert catalogs.world
+    assert all(entry.preview_samples for entry in catalogs.enemies)
+    assert all(entry.preview_samples for entry in catalogs.world)

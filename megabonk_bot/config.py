@@ -84,6 +84,7 @@ class MvpPolicyConfig:
     chest_policy: str = "never_open"
     auto_pick_upgrade_with_space: bool = True
     user_picks_character_manually: bool = True
+    survival_only: bool = False
     allow_map_scan_tab: bool = False
     map_scan_interval_ticks: int = 180
 
@@ -389,6 +390,8 @@ def _validate_config(data: dict[str, Any]) -> None:
     _validate_hsv_triplet("detection.enemy_hsv_lower", detection_enemy_hsv_lower)
     _validate_hsv_triplet("detection.enemy_hsv_upper", detection_enemy_hsv_upper)
 
+    mvp_survival_only = _must_have(mvp_policy, "mvp_policy", "survival_only")
+    _must_be_type("mvp_policy.survival_only", mvp_survival_only, bool)
     map_scan_interval = _must_have(mvp_policy, "mvp_policy", "map_scan_interval_ticks")
     _must_be_type("mvp_policy.map_scan_interval_ticks", map_scan_interval, int)
     _must_be_positive("mvp_policy.map_scan_interval_ticks", map_scan_interval)

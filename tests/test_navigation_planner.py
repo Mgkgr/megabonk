@@ -224,3 +224,45 @@ def test_navigation_planner_holds_on_high_drop_risk():
     assert action.jump == 0
     assert action.slide == 0
     assert navigation.drop_risk >= planner.drop_risk_threshold
+
+
+def test_navigation_planner_counts_mid_frame_wall_ahead():
+    planner = StatefulNavigationPlanner(config={"profile": "cautious", "lane_count": 5})
+    frame_w = 250
+    frame_h = 200
+    analysis = {
+        "enemies": [],
+        "grid": _lane_grid(
+            [
+                ("surface", "surface", "surface", "surface"),
+                ("surface", "surface", "surface", "surface"),
+                ("surface", "surface", "surface", "surface"),
+                ("surface", "surface", "surface", "surface"),
+                ("surface", "surface", "surface", "surface"),
+            ],
+            frame_w=frame_w,
+            frame_h=frame_h,
+        ),
+        "interactables": [],
+        "projectiles": [],
+        "enemy_classes": [],
+    }
+    analysis["grid"].append(_grid_cell("wall", (100, 70, 50, 30), 0.9))
+    snapshot = build_scene_snapshot(
+        frame_id=2,
+        ts=2.0,
+        frame_width=frame_w,
+        frame_height=frame_h,
+        analysis=analysis,
+        hud_values={},
+        is_dead=False,
+        is_upgrade=False,
+    )
+
+    action, navigation = planner.evaluate(_frame(frame_w, frame_h), snapshot, mode=BotMode.ACTIVE)
+
+    center_lane = navigation.lanes[len(navigation.lanes) // 2]
+    assert center_lane.obstacle_cost >= 0.40
+    assert center_lane.wall_ahead is True
+    assert action.jump == 0
+    assert action.yaw != 1

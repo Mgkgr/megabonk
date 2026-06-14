@@ -64,6 +64,7 @@ class NavigationLane:
     landing_clearance: float
     terrain_kind: str
     total_cost: float
+    wall_ahead: bool = False
 
 
 @dataclass(frozen=True)
@@ -180,7 +181,7 @@ class StatefulNavigationPlanner:
         slope_kind, slope_delta_z, slope_source = self._estimate_slope(snapshot)
         room_edge_risk = self._estimate_room_edge_risk(snapshot)
         lane_bounds = self._lane_bounds(frame_w)
-        grid_cells = tuple(self._iter_grid_cells(snapshot, nav_y0))
+        grid_cells = tuple(self._iter_grid_cells(snapshot, nav_y0, frame_h))
         lanes: list[NavigationLane] = []
         for index, (x0, x1) in enumerate(lane_bounds):
             metrics = self._lane_metrics(
@@ -219,6 +220,7 @@ class StatefulNavigationPlanner:
                     landing_clearance=metrics["landing_clearance"],
                     terrain_kind=lane_terrain,
                     total_cost=float(total_cost),
+                    wall_ahead=bool(metrics["wall_ahead"]),
                 )
             )
         center_lane = lanes[len(lanes) // 2]
@@ -328,11 +330,14 @@ class StatefulNavigationPlanner:
             return False
         return (
             center_lane.threat_score >= self._profile_limits()["threat_escape"]
+            or center_lane.wall_ahead
             or center_lane.obstacle_cost >= 0.62
             or center_lane.drop_risk >= self.drop_risk_threshold * 0.9
         )
 
     def _jump_gate(self, center_lane: NavigationLane, navigation: NavigationContext) -> tuple[bool, str]:
+        if center_lane.wall_ahead:
+            return False, "blocked_by_wall"
         if center_lane.drop_risk >= self.drop_risk_threshold * 0.85:
             return False, "blocked_by_drop_risk"
         if center_lane.landing_clearance < 0.55:
@@ -499,13 +504,17 @@ class StatefulNavigationPlanner:
             bounds.append((max(0, x0), min(frame_w, max(x0 + 1, x1))))
         return bounds
 
-    def _iter_grid_cells(self, snapshot: SceneSnapshot, nav_y0: int):
+    def _iter_grid_cells(self, snapshot: SceneSnapshot, nav_y0: int, frame_h: int):
+        mid_y0 = int(frame_h * 0.30)
         for item in snapshot.analysis.get("grid", []):
             rect = getattr(item, "rect", None)
             if rect is None or len(rect) < 4:
                 continue
             _, y, _, h = rect
-            if int(y + h) <= int(nav_y0):
+            label = str(getattr(item, "label", "unknown")).lower()
+            if int(y + h) <= int(nav_y0) and not (
+                label in {"wall", "obstacle"} and int(y + h) >= mid_y0
+            ):
                 continue
             yield item
 
@@ -531,6 +540,7 @@ class StatefulNavigationPlanner:
                 "drop_risk": 1.0,
                 "clearance": 0.0,
                 "landing_clearance": 0.0,
+                "wall_ahead": False,
             }
         nav_h = max(1, lane_gray.shape[0])
         near_y0 = int(nav_h * 0.68)
@@ -550,6 +560,7 @@ class StatefulNavigationPlanner:
         obstacle_weight = 0.0
         landing_sum = 0.0
         landing_weight = 0.0
+        wall_ahead = False
         for cell in grid_cells:
             cx, cy = self._rect_center(getattr(cell, "rect", None))
             if cx is None or cy is None or not (x0 <= cx < x1):
@@ -557,11 +568,15 @@ class StatefulNavigationPlanner:
             rel_y = _clamp((cy - nav_y0) / max(1.0, frame_h - nav_y0))
             weight = 0.8 + (rel_y * 1.4)
             label = str(getattr(cell, "label", "unknown")).lower()
+            if label == "wall":
+                wall_ahead = True
             surface_score = 1.0 if label == "surface" else 0.20 if label == "unknown" else 0.0
             obstacle_score = 1.0 if label in {"obstacle", "wall"} else 0.45 if label == "unknown" else 0.0
             support_sum += surface_score * weight
             support_weight += weight
             obstacle_focus = 1.15 - (rel_y * 0.45)
+            if label in {"obstacle", "wall"} and cy < nav_y0:
+                obstacle_focus = 3.0
             obstacle_sum += obstacle_score * obstacle_focus
             obstacle_weight += obstacle_focus
             if rel_y <= 0.45:
@@ -588,6 +603,7 @@ class StatefulNavigationPlanner:
             "drop_risk": float(drop_risk),
             "clearance": float(clearance),
             "landing_clearance": _clamp(landing_clearance),
+            "wall_ahead": wall_ahead,
         }
 
     def _lane_threat_score(

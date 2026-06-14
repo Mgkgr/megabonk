@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pydirectinput as di
 
+from megabonk_bot.runtime.screen_state import RuntimeScreenDetector, is_death_like_frame
 from megabonk_bot.vision import find_in_region
 
 di.PAUSE = 0.0
@@ -100,14 +101,6 @@ def tap(key, delay=0.05):
     di.keyUp(key)
     time.sleep(delay)
 
-
-def is_death_like_frame(frame, mean_thr=35.0, std_thr=12.0):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    mean = float(gray.mean())
-    std = float(gray.std())
-    return mean < mean_thr and std < std_thr
-
-
 class AutoPilot:
     def __init__(
         self,
@@ -126,6 +119,11 @@ class AutoPilot:
         self.template_thresholds = dict(DEFAULT_TEMPLATE_THRESHOLDS)
         if template_thresholds:
             self.template_thresholds.update(template_thresholds)
+        self.screen_detector = RuntimeScreenDetector(
+            templates=self.t,
+            regions=self.r,
+            template_thresholds=self.template_thresholds,
+        )
 
     def _thr(self, key):
         return float(self.template_thresholds.get(key, DEFAULT_TEMPLATE_THRESHOLDS[key]))
@@ -134,33 +132,7 @@ class AutoPilot:
         self.click_fn(int(x), int(y), delay)
 
     def detect_screen(self, frame):
-        if self._seen(frame, "tpl_dead", "REG_DEAD", self._thr("dead_hard")):
-            return "DEAD"
-        if self._seen(frame, "tpl_dead", "REG_DEAD", self._thr("dead_soft")) and is_death_like_frame(
-            frame
-        ):
-            return "DEAD"
-        if self._seen(frame, "tpl_confirm", "REG_DEAD_CONFIRM", self._thr("dead_confirm")):
-            return "DEAD"
-        if self._seen(frame, "tpl_char_select_title", "REG_CHAR_SELECT", self._thr("char_select_title")):
-            return "CHAR_SELECT"
-        if self._seen(frame, "tpl_play", "REG_MAIN_PLAY", self._thr("main_play_detect")):
-            return "MAIN_MENU"
-        if self._seen(frame, "tpl_unlocks_title", "REG_UNLOCKS", self._thr("unlocks_title")):
-            return "UNLOCKS_WEAPONS"
-        if self._seen(frame, "tpl_katana", "REG_CHEST", self._thr("chest_weapon_detect")) or self._seen(
-            frame, "tpl_dexec", "REG_CHEST", self._thr("chest_weapon_detect")
-        ):
-            return "CHEST_WEAPON_PICK"
-        if self._seen(frame, "tpl_blood_tome", "REG_CHEST", self._thr("chest_foliant_detect")) or self._seen(
-            frame, "tpl_foliant_bottom1", "REG_CHEST", self._thr("chest_foliant_detect")
-        ):
-            return "CHEST_FOLIANT_PICK"
-        if self._seen(frame, "tpl_lvl", "REG_HUD", self._thr("running_lvl")):
-            return "RUNNING"
-        if self._seen(frame, "tpl_minimap", "REG_MINIMAP", self._thr("running_minimap")):
-            return "RUNNING"
-        return "UNKNOWN"
+        return self.screen_detector.detect(frame)
 
     def safe_click_if_found(self, found, pos, score, thr):
         if not found or score < thr:

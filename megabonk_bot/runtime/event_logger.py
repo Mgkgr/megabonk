@@ -176,6 +176,7 @@ def _serialize_navigation_context(navigation_context) -> dict[str, Any] | None:
                 "landing_clearance": float(getattr(lane, "landing_clearance", 0.0)),
                 "terrain_kind": getattr(lane, "terrain_kind", "unknown"),
                 "total_cost": float(getattr(lane, "total_cost", 0.0)),
+                "wall_ahead": bool(getattr(lane, "wall_ahead", False)),
             }
         )
     return {
